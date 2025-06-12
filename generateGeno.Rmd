@@ -1,0 +1,103 @@
+---
+title: "generateGeno"
+output: html_document
+date: "2025-06-12"
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Uncertainty in PGS estimates
+
+Generate allele 1 frequencies from a uniform distribution on (0,1).
+We assume allele frequencies to follow HWE.
+
+```{r}
+M = 10000 # of SNPs, test with different ones
+N = 1000 # of individuals, fixed at first
+ps = runif(M, 0, 1) #  allele 1 frequencies for M SNPs
+
+h2 = 0.5 # assumed heritability, TODO: vary heritability 
+```
+
+#### Simplified effect sizes
+
+At first, the true effect sizes are assumed to come from normal distribution $\beta \sim N(0, 1)$.
+TODO: correct distribution parameters
+
+Simulate true effect sizes and effect size estimates with noise proportional to sample size.
+
+```{r}
+betas.s = rnorm(M, 0, 1) # draw true effect sizes from standard normal distribution
+beta.s.est = betas.s + 1/N * rnorm(M, 0, 1) # add noise proportional to sample size
+```
+
+#### Effect sizes taking into account negative selection
+
+We account for negative selection by assuming that the magnitude of effects $\beta^2$ is proportional to $(2p(1-p))^S$, where $S=-1$.
+This is done by drawing effect estimates from a multinomial normal distribution with mean 0 and variance of $(2p(1-p))^S$.
+Here we assume each SNP contributes equally to the total variance, with the variances summing up to $h^2$.
+Draw true effects from a normal distribution, which sd is proportional to heritability.
+The effects are estimated as in GWAS, by adding a random error term to the true estimate: $\hat{\beta} = \beta + \epsilon$, where $\epsilon \sim N(0,1/N)$.
+
+```{r}
+S = -1 # relative contributions of common vs rare variants
+var.neg = h2/((2*ps*(1-ps))^S*M) # variance proportional to negative selection coefficient, scaled to match heritability h2 and M SNPs
+betas.neg = rnorm(M, mean = 0, sd = sqrt(var.neg)) # draw betas with variance var.neg
+
+beta.neg.est = betas.neg + 1/N * rnorm(M, 0, 1) # add noise proportional to sample size
+summary(beta.neg.est)
+```
+
+**TODO**: plot 1/N against PGS variance
+
+Generate genotypes for N = {1000, 10000, 100000, 500000} individuals at 1000 loci assuming allele frequencies follow HWE.
+
+```{r}
+genotypes = matrix(nrow = N, ncol = M)
+for (i in 1:M) {
+  genotypes[, i] = rbinom(N, size = 2, prob = ps[i])
+}
+# TODO: vectorize for performance
+
+```
+
+#### Individual PGS estimates
+
+For each individual, we compute the PGS estimate as a weighted sum of their genotypes and corresponding effect estimates.
+**Note!** Each individual has their own genotypes, but the same effect estimates.
+We also compute the uncertainty in the effect estimate as a variance of the linear combination, assuming the random errors are independent.
+
+```{r}
+pgs = genotypes %*% beta.neg.est # compute PGS accounting for negative selection
+pgs.var = 1/N * rowSums(genotypes^2) # variance in individual PGS estimates due to noise in the effect size estimates
+```
+
+#### Individual PGS estimates by sampling
+
+TODO: how to get the variance in the beta estimates, which formula to use for PGS variance TODO: Try also: generate 1000 samples of the beta estimates, and for each sample compute the PGS for each individual, and compute the variance of these estimates.
+
+Then, adjust the simulation by assuming negative selection: the magnitude of effects $\beta^2$ is proportional to $(2p(1-p))^S$, where $S=-1$.
+(maybe sample betas from a standard normal distribution and the scale with the formula)
+
+#### Plot 
+```{r}
+source("generategeno.R")
+pgs.unc = PGS.uncertainty(1000, 10000, 0.5, -1)
+summary(pgs.unc$pgs)
+summary(pgs.unc$variance)
+```
+```{r}
+source("generategeno.R")
+pgs.sample.unc = PGS.sample.uncertainty(10000, 10000, 0.5, -1, 1000)
+summary(pgs.sample.unc$pgs)
+summary(pgs.sample.unc$variance)
+```
+```{r}
+var( 1/N * rnorm(M, 0, 1))
+```
+
