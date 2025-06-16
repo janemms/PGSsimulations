@@ -91,7 +91,7 @@ Then, adjust the simulation by assuming negative selection: the magnitude of eff
  
 ```{r}
 source("generategeno.R")
-pgs.unc = PGS.uncertainty(100000, 5000, 0.5, -1)
+pgs.unc = PGS.uncertainty(500000, 1000, 0.5, -1)
 summary(pgs.unc$pgs)
 summary(pgs.unc$variance)
 ```
@@ -140,19 +140,10 @@ ggplot(df, aes(x = N, y = Variance)) +
 ```
 
 #### Ordered PGS estimates with variance
+
 ```{r}
-source("generategeno.R")
-top.pgs = ordered.estimates(pgs.unc$pgs, pgs.unc$variance, 0.90, 0.95) # top 1 % PGS values with confidence level 0.95
-top.pgs$prop.certain.above
-top.pgs$prop.certain.below
-
-```
-
-
-#### 
-```{r}
-rho = 0.95 
-S = -1
+rho = 0.95 # confidence level
+S = -1 # selection coefficient
 ```
 
 M = 1000 and N = 1000, 10 000, 100 000, 250 000, 500 000
@@ -160,46 +151,215 @@ M = 1000 and N = 1000, 10 000, 100 000, 250 000, 500 000
 
 ```{r}
 M = 1000
+h2s = c(0.1, 0.25, 0.5, 0.8) # heritabilities
 Ns = c(1000, 10000, 100000, 250000, 500000) # of individuals
 t = 0.9 # 
-# (PGSs and) variances from PGS.uncertainty
-  # Ns[i] # of variances for each iteration
-    # collect variances
-  # proportion of PGSs certainly over t from ordered.estimates
-# plot variances of individual PGSs as a function of # of individuals, add prop.confident as label for each Ns[i]
-
-pgs.s1 = vector("list", length(Ns))
-pgs.vars.s1 = vector("list", length(Ns))
-
-for (i in 1:length(Ns)){
-  pgs.unc.s1 = PGS.uncertainty(Ns[i], M, h2, S)
-  pgs.s1[[i]] = pgs.unc.s1$pgs # PGSs for N = Ns[i]
-  pgs.vars.s1[[i]] = pgs.unc.s1$variance # variances of PGSs for N = Ns[i]
+certain.proportions.s1 = matrix(nrow = length(Ns), ncol = 2*length(h2s))
+df.var.list <- list() # list to store data frames
+for (j in 1:length(h2s)){
+  pgs = vector("list", length(Ns))
+  pgs.vars = vector("list", length(Ns))
+  ordered = matrix(nrow = length(Ns), ncol = 2) # matrix for storing proportions of certain PGS estimates
+  
+  for (i in 1:length(Ns)){
+    pgs.unc = PGS.uncertainty(Ns[i], M, h2s[j], S)
+    pgs[[i]] = pgs.unc$pgs # PGSs for N = Ns[i]
+    pgs.vars[[i]] = pgs.unc$variance # variances of PGSs for N = Ns[i]
+    
+    ord = ordered.estimates(pgs.unc$pgs, pgs.unc$variance, t, rho)
+    ordered[i, ] = c(ord$prop.certain.below, ord$prop.certain.above)
+  }
+  ind = 2*j - 1
+  certain.proportions.s1[, (ind):(ind+1)] = ordered # proportions of certain-below-t and certain-above-t
+  
+  all.var = unlist(pgs.vars)
+  N.rep = rep(Ns, times = sapply(pgs.vars, length))  # match each variance to its sample size
+  df.var.list[[j]] <- data.frame(
+    N = N.rep,
+    Variance = all.var,
+    h2 = h2s[j]
+  )
+  #all = unlist(pgs) # all PGSs concatenated
+  #all.var = unlist(pgs.vars) # all PGSs variances concatenated
+  #sample.size = rep(Ns, times = Ns) # matching vector of sample sizes for each PGS and variance value
+  #df.s1 = data.frame(N = sample.size, Variance = all.var) # data frame for plotting
+  
+  # plot variances of individual PGSs as a function of # of individuals, add prop.confident as label for each Ns[i]
 }
-all.s1 = unlist(pgs.s1) # all pgs concatenated
-all.var.s1 = unlist(pgs.vars.s1) # all pgs variances concatenated
+```
 
-sample.size = rep(Ns, times = Ns) # matching vector of sample sizes for each PGS and variance value
+```{r}
+ #Label the rows by sample size and columns by heritability + position
+rownames(certain.proportions.s1) <- paste0("N=", Ns)
+colnames(certain.proportions.s1) <- as.vector(t(outer(
+  h2s, c("Below", "Above"),
+  FUN = function(h, dir) paste0("h2=", h, "_", dir)
+)))
+certain.proportions.s1
 
-df.var = data.frame(N = sample.size, Variance = all.var.s1) # data frame for plotting
+print(round(certain.proportions.s1, 3)) # as table in R
 
-## proportion of PGS estimates certain above t 
-#ordered.s1 = ordered.estimates()
+# show table nicely
+library(knitr)
+kable(certain.proportions.s1, digits = 3, caption = "Proportion of Certain PGS Estimates (Below/Above Threshold)")
 
+```
+
+```{r}
+
+library(reshape2) # for plotting
+df.prop <- melt(certain.proportions.s1)
+colnames(df.prop) <- c("SampleSize", "Condition", "Proportion")
+df.prop$SampleSize <- factor(df.prop$SampleSize, levels = paste0("N=", Ns))
+
+df.prop$h2 <- sub("h2=([0-9.]+)_.*", "\\1", df.prop$Condition) # regex for plotting above/below separately
+df.prop$Direction <- sub(".*_(Below|Above)", "\\1", df.prop$Condition)
+
+ggplot(df.prop, aes(x = SampleSize, y = Proportion, fill = Direction)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_wrap(~ h2, labeller = label_bquote(h^2 == .(h2))) +
+  labs(title = "Proportion of Certain PGS Estimates",
+       y = "Proportion", x = "Sample Size") +
+  theme_minimal()
+
+```
+
+```{r}
+df.var.all <- do.call(rbind, df.var.list)
+# average variance against sample size
+ggplot(df.var.all, aes(x = N, y = Variance, color = factor(h2))) +
+  stat_summary(fun = mean, geom = "line", size = 1) +
+  stat_summary(fun.data = mean_cl_normal, geom = "errorbar", width = 0.1) +
+  scale_x_log10(breaks = Ns) +
+  scale_y_log10() +
+  labs(title = "Mean PGS Variance vs. Sample Size",
+       x = "Sample Size (log scale)", y = "PGS Variance",
+       color = expression(h^2)) +
+  theme_minimal()
 ```
 
 
 
 
+```{r}
+rownames(certain.proportions) = c("N = 1,000", "N = 10,000", "N = 100,000", "N = 250,000", "N = 500,000")
+colnames(certain.proportions) = c("below t, h = 0.1", "above t, h = 0.1", "below t, h = 0.25", "above t,  h = 0.25", "below t, h = 0.5", "above t, h = 0.5", "below t, h = 0.8", "above t, h = 0.8")
+certain.proportions
+```
+The uncertainty of the PGS estimates decreases with sample size and heritability.
 
 M = 10 000 and N = 1000, 10 000, 50 000
 - h2 = 0.1, 0.25, 0.5, 0.8
 
+```{r}
+M = 10000
+h2s = c(0.1, 0.25, 0.5, 0.8) # heritabilities
+Ns = c(1000, 10000, 50000) # of individuals
+t = 0.9 # 
+certain.proportions = matrix(nrow = length(Ns), ncol = 2*length(h2s))
+for (j in 1:length(h2s)){
+  pgs = vector("list", length(Ns))
+  pgs.vars = vector("list", length(Ns))
+  ordered = matrix(nrow = length(Ns), ncol = 2) # matrix for storing proportions of certain PGS estimates
+  
+  for (i in 1:length(Ns)){
+    pgs.unc = PGS.uncertainty(Ns[i], M, h2s[j], S)
+    pgs[[i]] = pgs.unc$pgs # PGSs for N = Ns[i]
+    pgs.vars[[i]] = pgs.unc$variance # variances of PGSs for N = Ns[i]
+    ord = ordered.estimates(pgs.unc$pgs, pgs.unc$variance, t, rho)
+    ordered[i, ] = c(ord$prop.certain.below, ord$prop.certain.above)
+  }
+  ind = 2*j - 1
+  certain.proportions[, (ind):(ind+1)] = ordered # proportions of certain-below-t and certain-above-t
+  
+  all = unlist(pgs) # all pgs concatenated
+  all.var = unlist(pgs.vars) # all pgs variances concatenated
+  sample.size = rep(Ns, times = Ns) # matching vector of sample sizes for each PGS and variance value
+  df.var = data.frame(N = sample.size, Variance = all.var) # data frame for plotting
+  # plot variances of individual PGSs as a function of # of individuals, add prop.confident as label for each Ns[i]
+}
+
+```
+
+
+```{r}
+rownames(certain.proportions) = c("N = 1,000", "N = 10,000", "N = 50,000")
+colnames(certain.proportions) = c("below t, h = 0.1", "above t, h = 0.1", "below t, h = 0.25", "above t,  h = 0.25", "below t, h = 0.5", "above t, h = 0.5", "below t, h = 0.8", "above t, h = 0.8")
+certain.proportions
+```
+With small sample size such as N = 50 000 or below, the uncertainty in the PGS estimates remains high.
+
 N = 50 000 and M = 500, 1000, 5 000, 10 000
 - h2 = 0.1, 0.25, 0.5, 0.8
 
+```{r}
+N = 50000 # of individuals
+h2s = c(0.1, 0.25, 0.5, 0.8) # heritabilities
+Ms = c(500, 1000, 5000, 10000) # of SNPs
+t = 0.9 # 
+certain.proportions = matrix(nrow = length(Ms), ncol = 2*length(h2s))
+for (j in 1:length(h2s)){
+  pgs = vector("list", length(Ms))
+  pgs.vars = vector("list", length(Ms))
+  ordered = matrix(nrow = length(Ms), ncol = 2) # matrix for storing proportions of certain PGS estimates
+  
+  for (i in 1:length(Ms)){
+    pgs.unc = PGS.uncertainty(N, Ms[i], h2s[j], S)
+    pgs[[i]] = pgs.unc$pgs # PGSs for M = Ms[i]
+    pgs.vars[[i]] = pgs.unc$variance # variances of PGSs for M = Ms[i]
+    ord = ordered.estimates(pgs.unc$pgs, pgs.unc$variance, t, rho)
+    ordered[i, ] = c(ord$prop.certain.below, ord$prop.certain.above)
+  }
+  certain.proportions[, (2*j-1):(2*j)] = ordered # proportions of certain-below-t and certain-above-t
+  
+  all = unlist(pgs) # all pgs concatenated
+  all.var = unlist(pgs.vars) # all pgs variances concatenated
+  #sample.size = rep(Ns, times = Ns) # matching vector of sample sizes for each PGS and variance value
+  #df.var = data.frame(N = sample.size, Variance = all.var) # data frame for plotting
+  # plot variances of individual PGSs as a function of # of individuals, add prop.confident as label for each Ns[i]
+}
+
+```
+
+```{r}
+certain.proportions
+```
+The proportion of certain above/below-threshold PGSs decreases with number of SNPs, as more SNPs means more variation. As before, the uncertainty decreases with heritability.
+
 N = 100 000, M = 5000 and t = 0.9, 0.95, 0.99
 
+```{r}
+M = 5000 # of SNPs
+h2 = 0.5 # heritability
+N = 100000 # of individuals
+ts = c(0.9, 0.95, 0.99) # PGS quantiles 
+certain.proportions = matrix(nrow = length(ts), ncol = 2)
+pgs = vector("list", length(Ns))
+pgs.vars = vector("list", length(Ns))
+ordered = matrix(nrow = length(ts), ncol = 2) # matrix for storing proportions of certain PGS estimates
+
+pgs.unc = PGS.uncertainty(N, M, h2, S)
+pgs[[i]] = pgs.unc$pgs # PGSs for N = Ns[i]
+pgs.vars[[i]] = pgs.unc$variance # variances of PGSs for N = Ns[i]
+  
+for (i in 1:length(ts)){
+  ord = ordered.estimates(pgs.unc$pgs, pgs.unc$variance, ts[i], rho)
+  ordered[i, ] = c(ord$prop.certain.below, ord$prop.certain.above)
+}
+ordered # proportions of certain-below-t and certain-above-t
+
+all = unlist(pgs) # all pgs concatenated
+all.var = unlist(pgs.vars) # all pgs variances concatenated
+#sample.size = rep(Ns, times = Ns) # matching vector of sample sizes for each PGS and variance value
+#df.var = data.frame(N = sample.size, Variance = all.var) # data frame for plotting
+# plot variances of individual PGSs as a function of # of individuals, add prop.confident as label for each Ns[i]
+
+
+```
+The proportion of certain-above-threshold PGSs decreases and proportion of certain-below-threshold PGSs increases with higher cutoff quantile t. 
+```{r}
+ordered
+```
 
 
 

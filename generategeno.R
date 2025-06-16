@@ -45,6 +45,7 @@ PGS.sample.uncertainty <- function(N, M, h2, S = -1, n.samples = 1000){
   }
   
   X <- matrix(rbinom(N * M, size = 2, prob = rep(ps, each = N)), nrow = N, ncol = M) # generate genotypes assuming allele frequencies follow HWE
+  
   idx.filter = apply(X, 2, sd) > 0 # filter out variants with no variation across individuals
   X.filtered = X[, idx.filter]
   beta.samples = beta.samples[, idx.filter] 
@@ -56,7 +57,7 @@ PGS.sample.uncertainty <- function(N, M, h2, S = -1, n.samples = 1000){
 
   
   pgs = colMeans(pgs.samples) # point estimates for PGSs
-  pgs.var = apply(pgs.samples, 2, var)
+  pgs.var = apply(pgs.samples, 2, var) # variances of individual PGS estimates
   
   return(list(pgs = pgs, variance = pgs.var))
 }
@@ -81,23 +82,28 @@ ordered.estimates <- function(pgs.est, pgs.var, t, rho){
   below.pgs.var = pgs.var[below.ind] # variances of lowest PGS estimates
   
   # confidence intervals
-  z = qnorm((1 + rho) / 2) # z = 1.96 for 95 % CI
+  z = qnorm((1 + rho)/2) # z = 1.96 for 95 % CI
   above.pgs.lower = above.pgs - z*sqrt(above.pgs.var) # lower end
   above.pgs.upper = above.pgs + z*sqrt(above.pgs.var) # upper end
   
   below.pgs.lower = below.pgs - z*sqrt(below.pgs.var) # lower end
   below.pgs.upper = below.pgs + z*sqrt(below.pgs.var) # upper end
   
+  cutoff.val = quantile(pgs.est, probs = t) # value at t:th quantile
   
   # proportion of individuals having CIs entirely above the t-quantile cutoff
-  cutoff.val = quantile(pgs.est, probs = t) # value at t:th quantile
-  ci.above.cutoff = above.pgs.lower > cutoff.val # number of lower CIs above t:th quantile, returns a logical vector
-  proportion.certain.above = mean(ci.above.cutoff) # proportion of pgs CIs entirely above t among those pgs estimates above t
-  
+  ci.above.t = above.pgs.lower > cutoff.val # number of lower CIs above t:th quantile, returns a logical vector
+  proportion.certain.above = mean(ci.above.t) # proportion of pgs CIs entirely above t among those pgs estimates above t
+  if (is.null(proportion.certain.above)) {
+    proportion.certain.above = 0.0
+  }
   # proportion of individuals having CIs entirely below the t-quantile cutoff
-  ci.below.cutoff = below.pgs.upper < cutoff.val # number of upper CIs below t:th quantile, returns a logical vector
-  proportion.certain.below = mean(ci.below.cutoff) # proportion of pgs CIs entirely below t among those pgs estimates below t
-  
+  ci.below.t = below.pgs.upper < cutoff.val # number of upper CIs below t:th quantile, returns a logical vector
+  proportion.certain.below = mean(ci.below.t) # proportion of pgs CIs entirely below t among those pgs estimates below t
+  if (is.null(proportion.certain.below)) {
+    proportion.certain.below = 0.0
+  }
+ 
   return(list(
     above.pgs = above.pgs, # above t % PGS estimates ...
     above.pgs.var = above.pgs.var, # ... and their corresponding variances
@@ -105,13 +111,13 @@ ordered.estimates <- function(pgs.est, pgs.var, t, rho){
     above.pgs.upper = above.pgs.upper, # upper end of rho level CIs
     cutoff.val = cutoff.val, # PGS value at t:th quantile
     prop.certain.above = proportion.certain.above, # proportion of PGSs certainly above t ...
-    confident.above.indices = above.ind[ci.above.cutoff], # ... and their indices
+    certain.above.indices = above.ind[ci.above.t], # ... and their indices
     below.pgs = below.pgs, # below t % PGS estimates ...
     below.pgs.var = below.pgs.var, # ... and their corresponding variances
     below.pgs.lower = below.pgs.lower, # lower end of rho level CIs
     below.pgs.upper = below.pgs.upper, # upper end of rho level CIs
     prop.certain.below = proportion.certain.below, # proportion of PGSs certainly below t ...
-    confident.below.indices = below.ind[ci.below.cutoff] # ... and their indices
+    certain.below.indices = below.ind[ci.below.t] # ... and their indices
   
   ))
   
