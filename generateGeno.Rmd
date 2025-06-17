@@ -139,7 +139,7 @@ ggplot(df, aes(x = N, y = Variance)) +
        y = "Variance of PGS") 
 ```
 
-#### Ordered PGS estimates with variance
+### Sample size vs. individual PGS variance
 
 ```{r}
 rho = 0.95 # confidence level
@@ -150,12 +150,12 @@ M = 1000 and N = 1000, 10 000, 100 000, 250 000, 500 000
 - h2 = 0.1, 0.25, 0.5, 0.8
 
 ```{r}
-M = 1000
+M = 1000 # of SNPs
 h2s = c(0.1, 0.25, 0.5, 0.8) # heritabilities
 Ns = c(1000, 10000, 100000, 250000, 500000) # of individuals
 t = 0.9 # 
 certain.proportions.s1 = matrix(nrow = length(Ns), ncol = 2*length(h2s))
-df.var.list <- list() # list to store data frames
+df.var.list = list() # list to store data frames
 for (j in 1:length(h2s)){
   pgs = vector("list", length(Ns))
   pgs.vars = vector("list", length(Ns))
@@ -166,87 +166,102 @@ for (j in 1:length(h2s)){
     pgs[[i]] = pgs.unc$pgs # PGSs for N = Ns[i]
     pgs.vars[[i]] = pgs.unc$variance # variances of PGSs for N = Ns[i]
     
-    ord = ordered.estimates(pgs.unc$pgs, pgs.unc$variance, t, rho)
+    ord = ordered.estimates(pgs.unc$pgs, pgs.unc$variance, t, rho) # collect certain proportions
     ordered[i, ] = c(ord$prop.certain.below, ord$prop.certain.above)
   }
   ind = 2*j - 1
   certain.proportions.s1[, (ind):(ind+1)] = ordered # proportions of certain-below-t and certain-above-t
   
-  all.var = unlist(pgs.vars)
+  all.var = unlist(pgs.vars) # flatten
   N.rep = rep(Ns, times = sapply(pgs.vars, length))  # match each variance to its sample size
-  df.var.list[[j]] <- data.frame(
+  df.var.list[[j]] = data.frame( # data frame of variances for heritability h2s[j]
     N = N.rep,
     Variance = all.var,
     h2 = h2s[j]
   )
-  #all = unlist(pgs) # all PGSs concatenated
-  #all.var = unlist(pgs.vars) # all PGSs variances concatenated
-  #sample.size = rep(Ns, times = Ns) # matching vector of sample sizes for each PGS and variance value
-  #df.s1 = data.frame(N = sample.size, Variance = all.var) # data frame for plotting
-  
-  # plot variances of individual PGSs as a function of # of individuals, add prop.confident as label for each Ns[i]
-}
+ }
 ```
 
 ```{r}
- #Label the rows by sample size and columns by heritability + position
-rownames(certain.proportions.s1) <- paste0("N=", Ns)
-colnames(certain.proportions.s1) <- as.vector(t(outer(
+#Label the rows by sample size and columns by heritability + position
+rownames(certain.proportions.s1) = paste0("N=", Ns)
+colnames(certain.proportions.s1) = as.vector(t(outer(
   h2s, c("Below", "Above"),
   FUN = function(h, dir) paste0("h2=", h, "_", dir)
 )))
-certain.proportions.s1
+certain.proportions.s1 
 
 print(round(certain.proportions.s1, 3)) # as table in R
 
-# show table nicely
-library(knitr)
+library(knitr) # clean table
 kable(certain.proportions.s1, digits = 3, caption = "Proportion of Certain PGS Estimates (Below/Above Threshold)")
 
+kable(certain.proportions.s1[, 3:6]) # for h = 0.25 and 0.5
+
 ```
 
 ```{r}
 
-library(reshape2) # for plotting
-df.prop <- melt(certain.proportions.s1)
-colnames(df.prop) <- c("SampleSize", "Condition", "Proportion")
-df.prop$SampleSize <- factor(df.prop$SampleSize, levels = paste0("N=", Ns))
+# Create a clean long-format data frame from certain.proportions.s1
+df.prop = data.frame(
+  SampleSize = rep(Ns, times = length(h2s) * 2),
+  h2 = rep(rep(h2s, each = 2), each = length(Ns)),
+  Direction = rep(rep(c("Below", "Above"), times = length(h2s)), each = length(Ns)),
+  Proportion = as.vector(certain.proportions.s1)
+)
 
-df.prop$h2 <- sub("h2=([0-9.]+)_.*", "\\1", df.prop$Condition) # regex for plotting above/below separately
-df.prop$Direction <- sub(".*_(Below|Above)", "\\1", df.prop$Condition)
+# Ensure factors for plotting
+df.prop$SampleSize = factor(df.prop$SampleSize, levels = Ns)
+df.prop$h2 = factor(df.prop$h2, levels = h2s)
 
+# Plot with ggplot2
+library(ggplot2)
 ggplot(df.prop, aes(x = SampleSize, y = Proportion, fill = Direction)) +
   geom_bar(stat = "identity", position = "dodge") +
-  facet_wrap(~ h2, labeller = label_bquote(h^2 == .(h2))) +
-  labs(title = "Proportion of Certain PGS Estimates",
-       y = "Proportion", x = "Sample Size") +
+  facet_wrap(~ h2, labeller = label_bquote(h^2 == .(as.numeric(as.character(h2))))) +
+  labs(
+    title = "Proportion of Certain PGS Estimates",
+    y = "Proportion",
+    x = "Sample Size"
+  ) +
   theme_minimal()
+
+
 
 ```
 
 ```{r}
-df.var.all <- do.call(rbind, df.var.list)
-# average variance against sample size
-ggplot(df.var.all, aes(x = N, y = Variance, color = factor(h2))) +
-  stat_summary(fun = mean, geom = "line", size = 1) +
-  stat_summary(fun.data = mean_cl_normal, geom = "errorbar", width = 0.1) +
-  scale_x_log10(breaks = Ns) +
+df.var = do.call(rbind, df.var.list)
+df.var$h2 = factor(df.var$h2)
+
+library(dplyr)
+
+df.mean.var = df.var %>%
+  group_by(N, h2) %>%
+  summarize(MeanVariance = mean(Variance), .groups = "drop")
+
+
+library(ggplot2)
+
+ggplot(df.mean.var, aes(x = N, y = MeanVariance, color = h2)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  scale_x_log10() +
   scale_y_log10() +
-  labs(title = "Mean PGS Variance vs. Sample Size",
-       x = "Sample Size (log scale)", y = "PGS Variance",
-       color = expression(h^2)) +
+  labs(
+    title = "Mean PGS Variance vs Sample Size",
+    x = "Sample Size (log scale)",
+    y = "Mean Variance of PGS (log scale)",
+    color = "Heritability (h²)"
+  ) +
   theme_minimal()
+df.mean.var
+str(df.mean.var)
+
+
 ```
 
-
-
-
-```{r}
-rownames(certain.proportions) = c("N = 1,000", "N = 10,000", "N = 100,000", "N = 250,000", "N = 500,000")
-colnames(certain.proportions) = c("below t, h = 0.1", "above t, h = 0.1", "below t, h = 0.25", "above t,  h = 0.25", "below t, h = 0.5", "above t, h = 0.5", "below t, h = 0.8", "above t, h = 0.8")
-certain.proportions
-```
-The uncertainty of the PGS estimates decreases with sample size and heritability.
+The uncertainty of the PGS estimates decreases with sample size and heritability. The lines corresponding to different heritabilities are overlapping.
 
 M = 10 000 and N = 1000, 10 000, 50 000
 - h2 = 0.1, 0.25, 0.5, 0.8
@@ -257,6 +272,7 @@ h2s = c(0.1, 0.25, 0.5, 0.8) # heritabilities
 Ns = c(1000, 10000, 50000) # of individuals
 t = 0.9 # 
 certain.proportions = matrix(nrow = length(Ns), ncol = 2*length(h2s))
+df.var.list = list() # list to store data frames
 for (j in 1:length(h2s)){
   pgs = vector("list", length(Ns))
   pgs.vars = vector("list", length(Ns))
@@ -272,23 +288,66 @@ for (j in 1:length(h2s)){
   ind = 2*j - 1
   certain.proportions[, (ind):(ind+1)] = ordered # proportions of certain-below-t and certain-above-t
   
-  all = unlist(pgs) # all pgs concatenated
-  all.var = unlist(pgs.vars) # all pgs variances concatenated
-  sample.size = rep(Ns, times = Ns) # matching vector of sample sizes for each PGS and variance value
-  df.var = data.frame(N = sample.size, Variance = all.var) # data frame for plotting
-  # plot variances of individual PGSs as a function of # of individuals, add prop.confident as label for each Ns[i]
+  all.var = unlist(pgs.vars) # flatten
+  N.rep = rep(Ns, times = sapply(pgs.vars, length))  # match each variance to its sample size
+  df.var.list[[j]] = data.frame( # data frame of variances for heritability h2s[j]
+    N = N.rep,
+    Variance = all.var,
+    h2 = h2s[j])
 }
 
 ```
 
+```{r}
+#Label the rows by sample size and columns by heritability + position
+rownames(certain.proportions) = paste0("N=", Ns)
+colnames(certain.proportions) = as.vector(t(outer(
+  h2s, c("Below", "Above"),
+  FUN = function(h, dir) paste0("h2=", h, "_", dir)
+)))
+certain.proportions 
+
+print(round(certain.proportions, 3)) # as table in R
+
+library(knitr) # clean table
+kable(certain.proportions, digits = 3, caption = "Proportion of Certain PGS Estimates (Below/Above Threshold)")
+
+kable(certain.proportions[, 3:6]) # for h = 0.25 and 0.5
+```
+
 
 ```{r}
-rownames(certain.proportions) = c("N = 1,000", "N = 10,000", "N = 50,000")
-colnames(certain.proportions) = c("below t, h = 0.1", "above t, h = 0.1", "below t, h = 0.25", "above t,  h = 0.25", "below t, h = 0.5", "above t, h = 0.5", "below t, h = 0.8", "above t, h = 0.8")
-certain.proportions
+df.var = do.call(rbind, df.var.list)
+df.var$h2 = factor(df.var$h2)
+
+library(dplyr)
+
+df.mean.var = df.var %>%
+  group_by(N, h2) %>%
+  summarize(MeanVariance = mean(Variance), .groups = "drop")
+
+
+library(ggplot2)
+
+ggplot(df.mean.var, aes(x = N, y = MeanVariance, color = h2, lty = h2)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  scale_x_log10() +
+  scale_y_log10() +
+  labs(
+    title = "Mean PGS Variance vs Sample Size",
+    x = "Sample Size (log scale)",
+    y = "Mean Variance of PGS (log scale)",
+    color = "Heritability (h²)"
+  ) +
+  theme_minimal()
+df.mean.var
+str(df.mean.var)
 ```
+
 With small sample size such as N = 50 000 or below, the uncertainty in the PGS estimates remains high.
 
+### Number of SNPs vs individual PGS variance
 N = 50 000 and M = 500, 1000, 5 000, 10 000
 - h2 = 0.1, 0.25, 0.5, 0.8
 
@@ -312,20 +371,65 @@ for (j in 1:length(h2s)){
   }
   certain.proportions[, (2*j-1):(2*j)] = ordered # proportions of certain-below-t and certain-above-t
   
-  all = unlist(pgs) # all pgs concatenated
-  all.var = unlist(pgs.vars) # all pgs variances concatenated
-  #sample.size = rep(Ns, times = Ns) # matching vector of sample sizes for each PGS and variance value
-  #df.var = data.frame(N = sample.size, Variance = all.var) # data frame for plotting
-  # plot variances of individual PGSs as a function of # of individuals, add prop.confident as label for each Ns[i]
+  all.var = unlist(pgs.vars) # flatten
+  N.rep = rep(Ms, times = sapply(pgs.vars, length))  # match each variance to its sample size
+  df.var.list[[j]] = data.frame( # data frame of variances for heritability h2s[j]
+    N = N.rep,
+    Variance = all.var,
+    h2 = h2s[j]
+  )
+  
 }
 
 ```
 
 ```{r}
-certain.proportions
-```
-The proportion of certain above/below-threshold PGSs decreases with number of SNPs, as more SNPs means more variation. As before, the uncertainty decreases with heritability.
+#Label the rows by sample size and columns by heritability + position
+rownames(certain.proportions) = paste0("M=", Ms)
+colnames(certain.proportions) = as.vector(t(outer(
+  h2s, c("Below", "Above"),
+  FUN = function(h, dir) paste0("h2=", h, "_", dir)
+)))
+certain.proportions 
 
+print(round(certain.proportions, 3)) # as table in R
+
+library(knitr) # clean table
+kable(certain.proportions, digits = 3, caption = "Proportion of Certain PGS Estimates (Below/Above Threshold)")
+
+kable(certain.proportions[, 3:6]) # only h = 0.25 and 0.5
+```
+The proportion of certain above/below-threshold PGSs decreases with number of SNPs, as more SNPs accumulate more variation. As before, the uncertainty decreases with heritability.
+
+```{r}
+df.var = do.call(rbind, df.var.list)
+df.var$h2 = factor(df.var$h2)
+
+library(dplyr)
+
+df.mean.var = df.var %>%
+  group_by(N, h2) %>%
+  summarize(MeanVariance = mean(Variance), .groups = "drop")
+
+
+library(ggplot2)
+
+ggplot(df.mean.var, aes(x = N, y = MeanVariance, color = h2, lty = h2)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  scale_x_log10() +
+  scale_y_log10() +
+  labs(
+    title = "Mean PGS Variance vs number of SNPs",
+    x = "Number of SNPs (log scale)",
+    y = "Mean Variance of PGS (log scale)",
+    color = "Heritability (h²)"
+  ) +
+  theme_minimal()
+
+```
+
+### Threshold t vs. individual PGS variance
 N = 100 000, M = 5000 and t = 0.9, 0.95, 0.99
 
 ```{r}
@@ -356,9 +460,13 @@ all.var = unlist(pgs.vars) # all pgs variances concatenated
 
 
 ```
+
 The proportion of certain-above-threshold PGSs decreases and proportion of certain-below-threshold PGSs increases with higher cutoff quantile t. 
 ```{r}
+colnames(ordered) = c("Certain-below", "Certain-above")
+rownames(ordered) = c("t = 0.9", "t = 0.95", "t = 0.99")
 ordered
+kable(ordered)
 ```
 
 
