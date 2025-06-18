@@ -88,26 +88,26 @@ TODO: how to get the variance in the beta estimates, which formula to use for PG
 Then, adjust the simulation by assuming negative selection: the magnitude of effects $\beta^2$ is proportional to $(2p(1-p))^S$, where $S=-1$.
 (maybe sample betas from a standard normal distribution and the scale with the formula)
 
- 
 ```{r}
-source("generategeno.R")
+source("PGSvariance.R")
 pgs.unc = PGS.uncertainty(500000, 1000, 0.5, -1)
 summary(pgs.unc$pgs)
 summary(pgs.unc$variance)
 ```
 
 ```{r}
-source("generategeno.R")
+source("PGSvariance.R")
 pgs.sample.unc = PGS.sample.uncertainty(1000, 10000, 0.5, -1, 1000)
 summary(pgs.sample.unc$pgs)
 summary(pgs.sample.unc$variance)
 #ordered.estimates(pgs.sample.unc$pgs, pgs.sample.unc$variance, 0.99, 0.95)
 
 ```
+
 #### Sampled PGS variance with different N
 
 ```{r}
-source("generategeno.R")
+source("PGSvariance.R")
 ns = c(100, 1000, 10000, 50000)
 M = 10000 # of SNPs
 h2 = 0.5 # heritability
@@ -119,7 +119,6 @@ for (i in 1:length(ns)){
   pgs.vars[[i]] = PGS.uncertainty(ns[i], M, h2, S)$variance
 }
 ```
-
 
 ```{r}
 
@@ -146,8 +145,7 @@ rho = 0.95 # confidence level
 S = -1 # selection coefficient
 ```
 
-M = 1000 and N = 1000, 10 000, 100 000, 250 000, 500 000
-- h2 = 0.1, 0.25, 0.5, 0.8
+M = 1000 and N = 1000, 10 000, 100 000, 250 000, 500 000 - h2 = 0.1, 0.25, 0.5, 0.8
 
 ```{r}
 M = 1000 # of SNPs
@@ -234,12 +232,9 @@ ggplot(df.prop, aes(x = SampleSize, y = Proportion, fill = Direction)) +
 df.var = do.call(rbind, df.var.list)
 df.var$h2 = factor(df.var$h2)
 
-library(dplyr)
-
-df.mean.var = df.var %>%
-  group_by(N, h2) %>%
-  summarize(MeanVariance = mean(Variance), .groups = "drop")
-
+df.mean.var <- aggregate(Variance ~ N + h2, data = df.var, FUN = mean) # compute mean of variances
+colnames(df.mean.var)[3] <- "MeanVariance"
+df.mean.var$MeanVariance <- round(df.mean.var$MeanVariance, 3)
 
 library(ggplot2)
 
@@ -255,16 +250,21 @@ ggplot(df.mean.var, aes(x = N, y = MeanVariance, color = h2)) +
     color = "Heritability (h²)"
   ) +
   theme_minimal()
-df.mean.var
-str(df.mean.var)
+#df.mean.var
+df.mean.var$MeanVariance
 
+df.wide <- reshape(df.mean.var, timevar = "h2", idvar = "N", direction = "wide") # print table
+colnames(df.wide) <- c("N", paste0("h2 = ", levels(df.var$h2)))
+
+colnames(df.wide) <- sub("Variance\\.", "", colnames(df.wide))
+kable(df.wide)
 
 ```
 
-The uncertainty of the PGS estimates decreases with sample size and heritability. The lines corresponding to different heritabilities are overlapping.
+The uncertainty of the PGS estimates decreases with sample size and heritability.
+The lines corresponding to different heritabilities are overlapping.
 
-M = 10 000 and N = 1000, 10 000, 50 000
-- h2 = 0.1, 0.25, 0.5, 0.8
+M = 10 000 and N = 1000, 10 000, 50 000 - h2 = 0.1, 0.25, 0.5, 0.8
 
 ```{r}
 M = 10000
@@ -315,7 +315,6 @@ kable(certain.proportions, digits = 3, caption = "Proportion of Certain PGS Esti
 kable(certain.proportions[, 3:6]) # for h = 0.25 and 0.5
 ```
 
-
 ```{r}
 df.var = do.call(rbind, df.var.list)
 df.var$h2 = factor(df.var$h2)
@@ -348,8 +347,8 @@ str(df.mean.var)
 With small sample size such as N = 50 000 or below, the uncertainty in the PGS estimates remains high.
 
 ### Number of SNPs vs individual PGS variance
-N = 50 000 and M = 500, 1000, 5 000, 10 000
-- h2 = 0.1, 0.25, 0.5, 0.8
+
+N = 50 000 and M = 500, 1000, 5 000, 10 000 - h2 = 0.1, 0.25, 0.5, 0.8
 
 ```{r}
 N = 50000 # of individuals
@@ -399,37 +398,43 @@ kable(certain.proportions, digits = 3, caption = "Proportion of Certain PGS Esti
 
 kable(certain.proportions[, 3:6]) # only h = 0.25 and 0.5
 ```
-The proportion of certain above/below-threshold PGSs decreases with number of SNPs, as more SNPs accumulate more variation. As before, the uncertainty decreases with heritability.
+
+The proportion of certain above/below-threshold PGSs decreases with number of SNPs, as more SNPs accumulate more variation.
+As before, the uncertainty decreases with heritability.
 
 ```{r}
-df.var = do.call(rbind, df.var.list)
-df.var$h2 = factor(df.var$h2)
 
-library(dplyr)
+df.var <- do.call(rbind, df.var.list) # combine data
+df.var$h2 <- factor(df.var$h2)
 
-df.mean.var = df.var %>%
-  group_by(N, h2) %>%
-  summarize(MeanVariance = mean(Variance), .groups = "drop")
+df.mean.var <- aggregate(Variance ~ N + h2, data = df.var, FUN = mean) # mean and var by M and h2
+colnames(df.mean.var)[3] <- "MeanVariance"
+df.mean.var$MeanVariance <- round(df.mean.var$MeanVariance, 5)
 
+df.wide <- reshape(df.mean.var, timevar = "h2", idvar = "N", direction = "wide")
+colnames(df.wide) <- c("M", paste0("h2 = ", levels(df.var$h2)))
+kable(df.wide)
 
 library(ggplot2)
 
-ggplot(df.mean.var, aes(x = N, y = MeanVariance, color = h2, lty = h2)) +
+ggplot(df.mean.var, aes(x = N, y = MeanVariance, color = h2)) +
   geom_line(size = 1) +
   geom_point(size = 2) +
   scale_x_log10() +
   scale_y_log10() +
   labs(
-    title = "Mean PGS Variance vs number of SNPs",
-    x = "Number of SNPs (log scale)",
+    title = "Mean PGS Variance vs Sample Size",
+    x = "Sample Size (log scale)",
     y = "Mean Variance of PGS (log scale)",
     color = "Heritability (h²)"
   ) +
   theme_minimal()
 
+
 ```
 
 ### Threshold t vs. individual PGS variance
+
 N = 100 000, M = 5000 and t = 0.9, 0.95, 0.99
 
 ```{r}
@@ -450,6 +455,8 @@ for (i in 1:length(ts)){
   ord = ordered.estimates(pgs.unc$pgs, pgs.unc$variance, ts[i], rho)
   ordered[i, ] = c(ord$prop.certain.below, ord$prop.certain.above)
 }
+colnames(ordered) = c("Below t", " Above t")
+rownames(ordered) = c("t=0.9", "t=0.95", "t=9.99")
 ordered # proportions of certain-below-t and certain-above-t
 
 all = unlist(pgs) # all pgs concatenated
@@ -461,14 +468,11 @@ all.var = unlist(pgs.vars) # all pgs variances concatenated
 
 ```
 
-The proportion of certain-above-threshold PGSs decreases and proportion of certain-below-threshold PGSs increases with higher cutoff quantile t. 
+The proportion of certain-above-threshold PGSs decreases and proportion of certain-below-threshold PGSs increases with higher cutoff quantile t.
+
 ```{r}
 colnames(ordered) = c("Certain-below", "Certain-above")
 rownames(ordered) = c("t = 0.9", "t = 0.95", "t = 0.99")
 ordered
 kable(ordered)
 ```
-
-
-
-

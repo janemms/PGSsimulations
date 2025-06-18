@@ -1,8 +1,9 @@
 
 # Function for testing individual PGS variability with different sample sizes, heritability, # of SNPs
 
-PGS.uncertainty <- function(N, M, h2, S = -1){
-  # N: # of individuals
+PGS.uncertainty <- function(N, n, M, h2, S = -1){
+  # N: # of individuals in GWAS used to estimate effect sizes
+  # n: # of individuals whose PGS is to be computed
   # M: # of SNPs
   # h2: heritability
   # S: relative contributions of common vs rare variants
@@ -11,7 +12,37 @@ PGS.uncertainty <- function(N, M, h2, S = -1){
   var.neg = h2/((2*ps*(1-ps))^S*M) # variance proportional to negative selection coefficient, scaled to match heritability h2 and M SNPs
   betas.neg = rnorm(M, mean = 0, sd = sqrt(var.neg)) # draw betas with variance var.neg
   
-  beta.neg.est = rnorm(M, betas.neg, sqrt(1/N *(1 - h2/M))) # add noise proportional to sample size, formula from paper 3
+  sigma.est = 1/N *(1 - var.neg) # effects of SNPs can be estimated with variance proportional to their allele frequency (rare alleles have larger effect sizes, and larger effect sizes can be estimated with smaller uncertainty)
+  
+  beta.neg.est = rnorm(M, betas.neg, sqrt(sigma.est)) # add noise proportional to sample size, formula from paper 3
+  
+  X <- matrix(rbinom(n * M, size = 2, prob = rep(ps, each = n)), nrow = n, ncol = M) # generate genotypes for n individuals assuming allele frequencies follow HWE
+  idx.filter = apply(X, 2, sd) > 0 # filter out SNPs with no variation
+  X = X[, idx.filter]
+  X = scale(X, center = TRUE, scale = TRUE)
+  beta.neg.est = beta.neg.est[idx.filter]
+  
+  pgs = X %*% beta.neg.est # compute PGS accounting for negative selection
+  
+  pgs.var = X^2 %*% sigma.est # variance in individual PGS estimates due to noise in the effect size estimates
+  
+  return(list(pgs = pgs, variance = pgs.var))
+}
+
+
+PGS.uncertainty.liability <- function(N, M, h2, S = -1, K, z){
+  # N: # of individuals
+  # M: # of SNPs
+  # h2: heritability
+  # S: relative contributions of common vs rare variants
+  # K: disease prevalence
+  # z: density of standard normal distribution at t = 1-K th quantile of the CDF
+  
+  ps = runif(M, 0, 1) #  allele 1 frequencies for M SNPs
+  var.neg = h2/((2*ps*(1-ps))^S*M) # variance proportional to negative selection coefficient, scaled to match heritability h2 and M SNPs
+  betas.neg = rnorm(M, mean = 0, sd = sqrt(var.neg)) # draw betas with variance var.neg
+  betas.scaled = betas.neg*K*(1-K)/z
+  beta.neg.est = rnorm(M, betas.scaled, sqrt(1/N *(1 - h2/M))) # add noise proportional to sample size, formula from paper 3
   
   X <- matrix(rbinom(N * M, size = 2, prob = rep(ps, each = N)), nrow = N, ncol = M) # generate genotypes assuming allele frequencies follow HWE
   idx.filter = apply(X, 2, sd) > 0
@@ -63,10 +94,10 @@ PGS.sample.uncertainty <- function(N, M, h2, S = -1, n.samples = 1000){
 }
 
 ordered.estimates <- function(pgs.est, pgs.var, t, rho){
-# pgs.est: list of PGS point estimates for each individual
-# pgs.var: list of variance of the PGS point estimate for each individual
-# t: above PGS quantile to be considered
-# rho: level of confidence intervals
+  # pgs.est: list of PGS point estimates for each individual
+  # pgs.var: list of variance of the PGS point estimate for each individual
+  # t: above PGS quantile to be considered
+  # rho: level of confidence intervals
   
   N = length(pgs.est)
   ind = 1:N # indices of PGS point estimates
@@ -81,7 +112,7 @@ ordered.estimates <- function(pgs.est, pgs.var, t, rho){
   below.pgs = pgs.est[below.ind] # lowest t*100 % PGS estimates
   below.pgs.var = pgs.var[below.ind] # variances of lowest PGS estimates
   
-  # confidence intervals
+  # confidence intervals:
   z = qnorm((1 + rho)/2) # z = 1.96 for 95 % CI
   above.pgs.lower = above.pgs - z*sqrt(above.pgs.var) # lower end
   above.pgs.upper = above.pgs + z*sqrt(above.pgs.var) # upper end

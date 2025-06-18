@@ -1,0 +1,133 @@
+---
+title: "Liability model"
+output: html_document
+date: "2025-06-17"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+N = 10000 # of individuals
+K = 0.1 # Ks <- c(0.01,0.05,0.1,0.2), lifetime prevalence of disease
+M = 1000 # of SNPs
+h2 = 0.5 # heritability TODO: vary heritability
+```
+
+Liability model in Visscher et al.
+
+```{r}
+U  <- seq(1/N,1-1/N,length=N) # sequence of probabilities between 0 and 1
+x  <- qnorm(U) # convert the probabilities to quantiles of the standard normal distribution (liability scores)
+t  <- qnorm(1-K) # threshold liability for disease based on prevalence K. People with liability > t have the disease
+R0 <- pnorm(x,mean=-t,sd=1,lower.tail = F) # risk distribution in the population, risk at each liability point x
+z = dnorm(t) # density of standard normal distribution at t
+```
+
+-   Generate random genotypes
+-   Somehow compute the liability for each individual, and a phenotype based on the liability
+-   Compute PGSs for each individual
+    -   this would require both a training and a validation set before getting to evaluate the performance
+
+```{r}
+ps = runif(M, 0, 1) #  allele 1 frequencies for M SNPs
+var.neg = h2/((2*ps*(1-ps))^S*M) # variance proportional to negative selection coefficient, scaled to match heritability h2 and M SNPs
+betas.neg = rnorm(M, mean = 0, sd = sqrt(var.neg)) # draw betas with variance var.neg
+betas.scaled = betas.neg*K*(1-K)/z
+beta.neg.est = rnorm(M, betas.scaled, sqrt(1/N *(1 - h2/M))) # add noise proportional to sample size, formula from paper 3
+
+
+
+X <- matrix(rbinom(N * M, size = 2, prob = rep(ps, each = N)), nrow = N, ncol = M) # generate genotypes assuming allele frequencies follow HWE
+```
+
+-   generate genetic effects G
+-   generate environmental effects E
+-   liability L = G + E
+
+```{r}
+G = rnorm(N, 0, sqrt(h2)) # genetic effects
+E = rnorm(N, 0, sqrt(1-h2)) # environmental effects
+L = G + E # liability values
+length(which(L > t))
+disease.status = ifelse(L > t, 1, 0) # assign disease status
+```
+
+```{r}
+cat("Simulated disease prevalence:", mean(disease.status), "\n")
+
+# Plot liability distribution
+library(ggplot2)
+df <- data.frame(Liability = L, Disease = factor(disease.status))
+
+ggplot(df, aes(x = Liability, fill = Disease)) +
+  geom_density(alpha = 0.5) +
+  geom_vline(xintercept = t) +
+  labs(title = "Liability threshold model",
+       subtitle = paste("simulated disease prevalence =", round(mean(disease.status),3)),
+       fill = "Disease Status") +
+  theme_minimal()
+
+```
+
+Generate genotypes and compute PGS using PGS.uncertainty
+
+```{r}
+PGSs = PGS.uncertainty(N, M, h2, -1) # Generate genotypes and compute PGS
+PGS = PGSs$pgs
+PGS.scaled = scale(PGS) # scale PGSs to have sd = 0 and var = 1
+e = rnorm(N, 0, sqrt(1-h2)) # environmental effects
+g = PGS.scaled * sqrt(h2) # genetic effects 
+l = g + e # liability values
+
+length(which(l > t))
+disease.status = ifelse(l > t, 1, 0) # assign disease status
+```
+
+```{r}
+cat("Simulated disease prevalence:", mean(disease.status), "\n")
+
+# Plot liability distribution
+library(ggplot2)
+df <- data.frame(Liability = l, Disease = factor(disease.status))
+
+ggplot(df, aes(x = Liability, fill = Disease)) +
+  geom_density(alpha = 0.5) +
+  geom_vline(xintercept = t) +
+  labs(title = "Liability threshold model",
+       subtitle = paste("simulated disease prevalence =", round(mean(disease.status),3)),
+       fill = "Disease Status") +
+  theme_minimal()
+```
+
+Generate genotypes and compute PGS using PGS.uncertainty.liability
+
+```{r}
+source("PGSvariance.R")
+PGSs = PGS.uncertainty.liability(N, M, h2, -1, K, z) # Generate genotypes and compute PGS
+PGS = PGSs$pgs
+PGS.scaled = scale(PGS) # scale PGSs to have sd = 0 and var = 1
+e = rnorm(N, 0, sqrt(1-h2)) # environmental effects
+g = PGS.scaled * sqrt(h2) # genetic effects
+l = g + e # liability values
+
+length(which(l > t))
+disease.status = ifelse(l > t, 1, 0) # assign disease status
+```
+
+```{r}
+cat("Simulated disease prevalence:", mean(disease.status), "\n")
+
+# Plot liability distribution
+library(ggplot2)
+df <- data.frame(Liability = l, Disease = factor(disease.status))
+
+ggplot(df, aes(x = Liability, fill = Disease)) +
+  geom_density(alpha = 0.5) +
+  geom_vline(xintercept = t) +
+  labs(title = "Liability threshold model",
+       subtitle = paste("simulated disease prevalence =", round(mean(disease.status),3)),
+       fill = "Disease Status") +
+  theme_minimal()
+```
