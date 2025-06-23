@@ -132,15 +132,17 @@ PGS.sample.rankings <- function(N, M, n, h2, n.samples, S = -1, t = 0.9){
   
   # compute rankings of PGS estimates
   rankings = matrix(nrow = n, ncol = n.samples) # a (n x n.samples) matrix of rankings
+  
   for (i in 1:n.samples) {
     ind = 1:n # indices of PGS point estimates
-    rankings[, i] = order(pgs.est[,i], decreasing = FALSE) # order indices from smallest PGS to largest
+    rankings[, i] = as.integer(rank(pgs.est[, i], ties.method = "first")) # order indices from smallest PGS to largest
+      #order(pgs.est[,i], decreasing = FALSE) 
+    
   }
   t.ind = ceiling(t*n) # cutoff index
   rank.prop = apply(rankings, 1, function(x){mean(x > t.ind)
     #return(mean(above))
   })
-  
   
   return(list(
     geno = X, # a (n x M) matrix of genotypes of n individuals on M SNPs
@@ -152,17 +154,6 @@ PGS.sample.rankings <- function(N, M, n, h2, n.samples, S = -1, t = 0.9){
     )) 
 }
   
-# funktion ulkopuolella
-
-# vertaa rankingeja eri tavoilla:
-# - esim: kuinka suuri osuus rankingeistä on yli t 
-# - esim: plottaa ja sijoita rankingit ranking-akselille /
-#         plottaa ja sijoita pgs arvot akselille, ja väritä sen mukaan onko yli vai alle t
-
-
-# uusi funktio, sama idea kuin ordered.estimates, mutta edellisestä saaduilla rankingeilla
-# vai tee edellisen funktion sisällä?
-
 ordered.estimates <- function(pgs.est, pgs.var, t, rho){
   # pgs.est: list of PGS point estimates for each individual
   # pgs.var: list of variance of the PGS point estimate for each individual
@@ -224,5 +215,20 @@ ordered.estimates <- function(pgs.est, pgs.var, t, rho){
   
   ))
   
+}
+
+compute.rank.correlations <- function(pgs.ranks, n.pairs = 1000, seed = 42) {
+  set.seed(seed)
+  #pgs.ranks = t(pgs.ranks) # n.sample rankings for the n indviduals, t(n x n.samples) matrix = (n.samples x n) matrix
+  n.samples = ncol(pgs.ranks) # of samples (ranks) for each individual
+  
+  all.pairs = combn(n.samples, 2) # all unique combinations of indices of samples (2 x jotain) matrix
+  nof.pairs = ncol(all.pairs) # of unique pairs
+  sample.ind = sample(nof.pairs, min(n.pairs, length(all.pairs))) # samples the n.pairs pairs from the possible pairs nof.pairs
+  
+  sampled.pairs = as.matrix(all.pairs[,sample.ind, drop = FALSE]) # n.pairs based on sample.ind (2 x n.pairs) matrix
+  
+  corrs = apply(sampled.pairs, 2, function(pair){cor(pgs.ranks[, pair[1]], pgs.ranks[, pair[2]], method = "spearman")}) # compute Spearman correlations for each pairs
+  return(corrs)
 }
 
