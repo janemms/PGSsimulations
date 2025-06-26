@@ -190,28 +190,190 @@ colMeans(rank.correlations)
 
 ```{r}
 # violin plot rank correlations
-rank.df = as.data.frame(rank.correlations) # to df
+rank.df = na.omit(as.data.frame(rank.correlations)) # to df
 rank.df$N = N.names
 rank.df$h2 = h2.names
 rank.long = melt(rank.df, variable.name = "Condition", value.name = "Correlation") # reshape to long format
 
 rank.long$N = as.numeric(sub("^N([0-9.e+-]+)\\.h2\\..*$", "\\1", rank.long$Condition))
 rank.long$h2 = as.numeric(sub(".*\\.h2\\.(.*)", "\\1", rank.long$Condition))
-rank.long[170000, ]
 
-ggplot(rank.long, aes(x = as.numeric(factor(N)), y = Correlation, fill = factor(h2), group = h2)) +
-  geom_violin(fill = h2) +
+plot.df = rank.long[rank.long$h2 == h2s[1], ]
+
+plot.df$N <- factor(plot.df$N)       # treat N as categorical for x-axis
+
+
+for (i in 1:length(h2s)){
+  plot.df = rank.long[rank.long$h2 == h2s[i], ]
+  pl = ggplot(na.omit(plot.df), aes(factor(N), Correlation))
+  print(pl + geom_violin(scale="count") +
   labs(x = "Sample size (N)", fill = "h²") +
-  theme_minimal()
+  ylim(-0.05,1) +
+  theme_minimal())
+
+}
+
 
 
 ```
 
+# Visualization of individual PGS estimates
+
+#### Individual PGS rankings
+```{r}
+source("PGSvariance.R")
+M = 1000 # of SNPs
+h2 = 0.5 # c(0.1, 0.25, 0.5, 0.8) # heritabilities
+N = 50000 # of individuals in GWAS training data
+n.samples = 100 #
+t = 0.9 # 
+n = 100 # of individuals whose PGSs are computed
+
+v.rankings = PGS.sample.rankings(N, M, n, h2, n.samples, S = -1, t)
+
+# plot rankings of a random individual
+pgs.rankings = v.rankings$pgs.rankings
+ind.rankings = pgs.rankings[30, ]
+
+q.vals = rep(t * n, times = n.samples) #apply(pgs.rankings, 1, quantile, probs = t) # values at tth quantiles
+col = ifelse(ind.rankings > q.vals, "above t", "below t")
+
+df <- data.frame(x = ind.rankings, y = 0, col = factor(col, levels = c("below t", "above t")))
+
+ggplot(df, aes(x = x, y = y, color = col)) +
+  geom_point(position = position_jitter(height = 0.05), size = 2) +
+  geom_vline(xintercept = t*n, linetype = "dashed", color = "black") +
+  scale_color_manual(values = c("above t" = "red", "below t" = "blue")) +
+  theme_minimal() +
+  theme(
+    axis.title.y = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor.y = element_blank()
+  ) +
+  labs(
+    title = "Distribution of individual PGS rankings",
+    x = "Value",
+    color = paste0("> ", t * 100, "th percentile")
+  ) +
+  coord_cartesian(ylim = c(-0.5, 0.5))
+
+```
 
 
+#### Individual PGS estimates
+```{r}
+source("PGSvariance.R")
+M = 1000 # of SNPs
+h2 = 0.5 # c(0.1, 0.25, 0.5, 0.8) # heritabilities
+N = 50000 # of individuals in GWAS training data
+n.samples = 100 #
+t = 0.9 # 
+n = 100 # of individuals whose PGSs are computed
 
-2 samples for each individual
--> correlation, plot all individual correlations as a violin plot,
-    with different h2 and N
+v.rankings = PGS.sample.rankings(N, M, n, h2, n.samples, S = -1, t)
 
+# plot rankings of a random individual
+pgs.est = v.rankings$pgs.est
+ind.est = pgs.est[30, ]
+
+q.vals = apply(pgs.rankings, 1, quantile, probs = t) # values at t:th quantiles
+col = ifelse(ind.rankings > q.vals, "above t", "below t")
+
+df <- data.frame(x = ind.rankings, y = 0, col = factor(col, levels = c("below t", "above t")))
+
+ggplot(df, aes(x = x, y = y, color = col)) +
+  geom_point(position = position_jitter(height = 0.05), size = 2) +
+  scale_color_manual(values = c("above t" = "red", "below t" = "blue")) +
+  theme_minimal() +
+  theme(
+    axis.title.y = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor.y = element_blank()
+  ) +
+  labs(
+    title = "Distribution of individual PGS estimates",
+    x = "Value",
+    color = paste0("> ", t * 100, "th percentile")
+  ) +
+  coord_cartesian(ylim = c(-0.5, 0.5))
+
+```
+
+## Change in rankings, correlation and proportion over t for different N within individuals
+
+Generate genotype data and true genetic effects
+```{r}
+source("PGSvariance.R")
+M = 1000 # of SNPs
+n = 10000 
+h2 = 0.5
+geno = generate.geno(M, n, h2, S = -1) # generate genotypes, betas and collect variance parameters
+var = geno$var
+beta = geno$beta
+X = geno$X
+
+```
+
+```{r}
+Ns = c(1000, 10000, 100000, 250000, 500000) # of individuals in GWAS training data
+n.samples = 1000 # for each individual
+
+props = matrix(nrow = 4, ncol = length(Ns)) # rows individuals, columns Ns
+ranks = matrix(nrow = 4*length(Ns), ncol = n.samples)
+
+for (i in 1:length(Ns)){
+  rankings = PGS.sample.rankings.2(N, n.samples, X, var, beta, t = 0.9) 
+  props[, i] = rankings$prop.over.t[1:4]  
+  ranks[((i-1)*4 + 1): (i*4), ] = rankings$pgs.rankings[1:4, ]
+  
+  # compute.rank.correlations <- function(pgs.ranks, n.pairs = 1000, seed = 42) {
+}
+```
+
+```{r}
+library(patchwork)
+# individuals 1, 2, 3 and 4
+plots = list()
+for (i in 1:4){ # individuals
+  for (j in 1:length(Ns)){
+    ind.rankings = ranks[(j-1)*4 + i, ]
+    
+    q.vals = rep(t * n, times = n.samples) #apply(pgs.rankings, 1, quantile, probs = t) # values at tth quantiles
+    col = ifelse(ind.rankings > q.vals, "above t", "below t")
+    
+    df = data.frame(x = ind.rankings, y = 0, col = factor(col, levels = c("below t", "above t")))
+    
+    print(ggplot(df, aes(x = x, y = y, color = col)) +
+      geom_point(position = position_jitter(height = 0.05), size = 2) +
+      geom_vline(xintercept = t*n, linetype = "dashed", color = "black") +
+      scale_color_manual(values = c("above t" = "red", "below t" = "blue")) +
+      theme_minimal() +
+      theme(
+        axis.title.y = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank()
+      ) +
+      labs(
+        title = paste0("Individual PGS rankings with N = ", Ns[j]),
+        x = "Value",
+        color = paste0("> ", t * 100, "th percentile")
+      ) +
+      coord_cartesian(ylim = c(-0.5, 0.5)))
+    
+  }
+  
+}
+
+```
+
+```{r}
+props
+
+```
 
