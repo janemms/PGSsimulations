@@ -7,6 +7,18 @@ date: "2025-06-19"
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
+In this file we do simulations on the relative rankings of individual Polygenic Scores. As the PGS value itself can vary between GWASes and simulations, we look at the relative rankings, which are in some sense a more objective measure of the relative risk of an individual wrt the rest of the population. We study how variable the relative rankings of individual Polygenic Scores are between simulation rounds, and which proportion of individuals are "certain" above or below the top PGS quantile. We sample genotypes and effects sizes, estimate the effect sizes and compute polygenic scores. We order the PGS estimates and collect their rankings. When the effect sizes are sampled and PGS rankings collected several times, we can observe how much the individual rankings change due to the effect estimation uncertainty. We collect
+- PGS rankings for each individual
+- Proportion of PGS rankings in the top PGS quantile for each individual (can be interpreted as the probability of being in the top PGS quantile)
+- Correlations of two rankings of the same individual 
+
+For each individual we also compute the mean and median rankings, as well as the range of the rankings, which describes well how variable the individual rankings are. We see that the mean range of the rankings decreases with increasing heritability and GWAS sample size N. However, even with large sample size and heritability, there is large variation in the range of the PGS rankings between individuals, which seems to indicate that some individuals can be more reliably classified as a high- or low-risk individuals than others. 
+
+Looking at the proportion of rankings in the top PGS quantile for each individual, the maximum proportion appropaches 1.0 as heritability and GWAS sample size increases. For sample size > 50 000, we can reliably classify the top PGS individuals even with very low heritability. For small sample size and small heritability, even the individuals with highest PGS estimates have significant uncertainty in them, and are not in the top PGS quantile with high probability. We also observe that the proportion of individual PGSs over threshold t approaches either 1 or 0 with increasing sample size and heritability.
+
+We also studied the order-correlation of individual's PGS estimates by comparing the rankings from two PGS estimations. From the violin-plots we see that the correlation increases significantly with GWAS training sample size, and moderately with increasing heritability.
+
+Finally, we visualized the individual PGS estimates as well as their rankings. For individuals that have rankings both above- and below-threshold we notice that some below-threshold PGS values are larger than some above-threshold PGS values, and vice versa. This demonstrates that the PGS values themselves are only to be used in ranking individuals with effect estimates from the same GWAS.
 
 ## Sampling PGS relative rankings
 
@@ -14,7 +26,7 @@ Collect PGS rankings, correlations and proportions in one loop.
 ```{r}
 source("PGSvariance.R")
 M = 1000 # of SNPs
-h2s = c(0.1, 0.25, 0.5, 0.8) # heritabilities
+h2s = c(0.2, 0.5, 0.8) # heritabilities
 Ns = c(1000, 10000, 100000, 250000, 500000) # of individuals in GWAS training data
 n.samples = 10000 #
 t = 0.9 # 
@@ -78,14 +90,57 @@ head(ranking.stats)
 ```{r}
 # mean range of rankings for each N and h2
 range.cols = seq(from = n.stats, to = ncol(ranking.stats), by = n.stats)
-range.means = colMeans(ranking.stats[,range.cols])
+ranges = ranking.stats[,range.cols]
 
-range.mat = matrix(range.means, nrow = length(Ns), ncol = length(h2s), byrow = FALSE) # format
+range.means = colMeans(ranges)
+
+range.mat = matrix(round(range.means), nrow = length(Ns), ncol = length(h2s), byrow = FALSE) # format
 
 rownames(range.mat) = paste0("N = ", Ns)
 colnames(range.mat) = paste0("h2 = ", h2s)
 
 range.mat
+```
+
+
+```{r}
+# consider only N = 500000 and h2 = 0.5
+rankings.Nlarge = ranking.stats[,c(66, 68, 69)]
+
+# order rows by mean from smallest to largest
+ordered.rankings = rankings.Nlarge[order(rankings.Nlarge[, 1]), ]
+
+n = nrow(ordered.rankings) # split the ordered matrix into 10 deciles
+decile_size = n / 10
+
+# MEAN
+means = ordered.rankings[,1] # extract means 
+mean.deciles = split(means, rep(1:10, each = decile_size))
+
+# compute the mean of the means in each decile
+mean_of_means = sapply(mean.deciles, function(mat) round(mean(mat)))
+
+# MIN
+mins = ordered.rankings[,2] # extract mins
+min.deciles = split(mins, rep(1:10, each = decile_size))
+
+# compute the mean of the means in each decile
+min_of_mins = sapply(min.deciles, function(mat) min(mat))
+
+# MAX
+maxs = ordered.rankings[,3] # extract maxs
+max.deciles = split(maxs, rep(1:10, each = decile_size))
+
+# compute the mean of the means in each decile
+max_of_maxs = sapply(max.deciles, function(mat) max(mat))
+
+# RANGE
+ranges = max_of_maxs - min_of_mins # max ranges in each decile
+
+# TABLE 
+ranking.table = cbind(mean_of_means, ranges, min_of_mins, max_of_maxs)
+colnames(ranking.table) = c("Mean rankings", "Range", "Min ranking", "Max ranking")
+ranking.table
 ```
 
 ### Proportion of individual PGS estimates over t
@@ -108,7 +163,7 @@ apply(proportions, 2, max)
 
 ```{r}
 # Split into groups for clearer plotting
-n.groups = 10  # number of groups 
+n.groups = 30  # number of groups 
 
 group.means = matrix(NA, nrow = n.groups, ncol = ncol(proportions)) # a matrix to store means: rows = groups, cols = N-h2-groups
 
@@ -146,7 +201,7 @@ h2.rep = rep(h2s, times = length(Ns))
 prop.df = as.data.frame(group.means) # convert to data frame
 colnames(prop.df) = paste0("N", N.rep, ".h2.", h2.rep)
 
-prop.long = melt(prop.df, variable.name = "Condition", value.name = "Proportion") # reshape to long format
+prop.long = reshape2::melt(prop.df, variable.name = "Condition", value.name = "Proportion") # reshape to long format
 
 prop.long$N = as.numeric(sub("^N([0-9.e+-]+)\\.h2\\..*$", "\\1", prop.long$Condition))
 prop.long$h2 = as.numeric(sub(".*\\.h2\\.(.*)", "\\1", prop.long$Condition))
@@ -160,7 +215,7 @@ ggplot(prop.long, aes(x = as.numeric(factor(N), -0.3, 0.3),
                       color = factor(h2))) +
   geom_point(alpha = 0.6, size = 2) +
   scale_x_continuous(breaks = 1:length(Ns), labels = Ns) +
-  labs(x = "Sample size (N)", y = "Proportion", color = "h²") +
+  labs(x = "Sample size (N)", y = "Proportion of rankings over t", color = "h²") +
   theme_minimal()
 
 
@@ -189,18 +244,28 @@ colMeans(rank.correlations)
 ```
 
 ```{r}
+library(knitr)
 # violin plot rank correlations
 rank.df = na.omit(as.data.frame(rank.correlations)) # to df
-rank.df$N = N.names
-rank.df$h2 = h2.names
-rank.long = melt(rank.df, variable.name = "Condition", value.name = "Correlation") # reshape to long format
+#rank.df$N = N.names
+#rank.df$h2 = h2.names
+rank.long = reshape2::melt(rank.df, variable.name = "Condition", value.name = "Correlation") # reshape to long format
+
 
 rank.long$N = as.numeric(sub("^N([0-9.e+-]+)\\.h2\\..*$", "\\1", rank.long$Condition))
 rank.long$h2 = as.numeric(sub(".*\\.h2\\.(.*)", "\\1", rank.long$Condition))
 
+mean.matrix = with(rank.long, tapply(Correlation, list(N, h2), mean))
+colnames(mean.matrix) = paste0("h2 = ", colnames(mean.matrix))
+
+Ns_ordered = sort(unique(rank.long$N)) # order rows by N
+mean.matrix = mean.matrix[as.character(Ns_ordered), , drop = FALSE]
+
+kable(round(mean.matrix,3))
+
 plot.df = rank.long[rank.long$h2 == h2s[1], ]
 
-plot.df$N <- factor(plot.df$N)       # treat N as categorical for x-axis
+plot.df$N = factor(plot.df$N)       # treat N as categorical for x-axis
 
 
 for (i in 1:length(h2s)){
@@ -214,33 +279,42 @@ for (i in 1:length(h2s)){
 }
 
 
-
 ```
 
 # Visualization of individual PGS estimates
 
-#### Individual PGS rankings
 ```{r}
+# Load required libraries
+library(ggplot2)
+library(patchwork)
+
 source("PGSvariance.R")
-M = 1000 # of SNPs
-h2 = 0.5 # c(0.1, 0.25, 0.5, 0.8) # heritabilities
-N = 50000 # of individuals in GWAS training data
-n.samples = 100 #
-t = 0.9 # 
-n = 100 # of individuals whose PGSs are computed
 
+# Parameters
+M = 1000
+h2 = 0.5
+N = 50000
+n.samples = 100
+t = 0.9
+n = 100
+
+# Simulate data
 v.rankings = PGS.sample.rankings(N, M, n, h2, n.samples, S = -1, t)
+pgs.rankings = v.rankings$pgs.rankings  # a (n x n.samples) matrix of PGS samples (every row corresponds to an individual)
+pgs.est = v.rankings$pgs.est  # a (n x n.samples) matrix of rankings of n.samples PGS estimates for n individuals (every row corresponds to an individual)
 
-# plot rankings of a random individual
-pgs.rankings = v.rankings$pgs.rankings
-ind.rankings = pgs.rankings[30, ]
+# Individual index
+i = 30
 
-q.vals = rep(t * n, times = n.samples) #apply(pgs.rankings, 1, quantile, probs = t) # values at tth quantiles
-col = ifelse(ind.rankings > q.vals, "above t", "below t")
+## Plot 1: Rankings
+ind.rankings = pgs.rankings[i, ] # take all sample rankings of the ith individual
+q.vals1 = rep(t * n, times = n.samples) # a vector of quantile values
+col1 = ifelse(ind.rankings > q.vals1, "above t", "below t") # label rankings based on if they are above or below the quantile
+df1 = data.frame(x = ind.rankings, y = 0, col = factor(col1, levels = c("below t", "above t")))
+pct.above = mean(col1 == "above t") * 100
 
-df <- data.frame(x = ind.rankings, y = 0, col = factor(col, levels = c("below t", "above t")))
 
-ggplot(df, aes(x = x, y = y, color = col)) +
+plot1 = ggplot(df1, aes(x = x, y = y, color = col)) +
   geom_point(position = position_jitter(height = 0.05), size = 2) +
   geom_vline(xintercept = t*n, linetype = "dashed", color = "black") +
   scale_color_manual(values = c("above t" = "red", "below t" = "blue")) +
@@ -257,33 +331,17 @@ ggplot(df, aes(x = x, y = y, color = col)) +
     x = "Value",
     color = paste0("> ", t * 100, "th percentile")
   ) +
-  coord_cartesian(ylim = c(-0.5, 0.5))
+  coord_cartesian(ylim = c(-0.5, 0.5)) 
 
-```
+## Plot 2: Estimates
 
+# Correct extraction
+ind.est = pgs.est[i, ]  # take all sample PGS estimates of the ith individual
+q.est = apply(pgs.est, 2, quantile, probs = t) # calculate values at tth quantile at each columns
+col2 = ifelse(ind.est > q.est, "above t", "below t") # label PGSs based on if they are above or below the quantile
+df2 = data.frame(x = ind.est, y = 0, col = factor(col2, levels = c("below t", "above t")))
 
-#### Individual PGS estimates
-```{r}
-source("PGSvariance.R")
-M = 1000 # of SNPs
-h2 = 0.5 # c(0.1, 0.25, 0.5, 0.8) # heritabilities
-N = 50000 # of individuals in GWAS training data
-n.samples = 100 #
-t = 0.9 # 
-n = 100 # of individuals whose PGSs are computed
-
-v.rankings = PGS.sample.rankings(N, M, n, h2, n.samples, S = -1, t)
-
-# plot rankings of a random individual
-pgs.est = v.rankings$pgs.est
-ind.est = pgs.est[30, ]
-
-q.vals = apply(pgs.rankings, 1, quantile, probs = t) # values at t:th quantiles
-col = ifelse(ind.rankings > q.vals, "above t", "below t")
-
-df <- data.frame(x = ind.rankings, y = 0, col = factor(col, levels = c("below t", "above t")))
-
-ggplot(df, aes(x = x, y = y, color = col)) +
+plot2 = ggplot(df2, aes(x = x, y = y, color = col)) +
   geom_point(position = position_jitter(height = 0.05), size = 2) +
   scale_color_manual(values = c("above t" = "red", "below t" = "blue")) +
   theme_minimal() +
@@ -299,9 +357,30 @@ ggplot(df, aes(x = x, y = y, color = col)) +
     x = "Value",
     color = paste0("> ", t * 100, "th percentile")
   ) +
-  coord_cartesian(ylim = c(-0.5, 0.5))
+  coord_cartesian(ylim = c(-0.5, 0.5)) +
+  annotate("text", x = Inf, y = 0.4, label = paste0(round(pct.above, 1), "% above t"), 
+           hjust = 1.1, size = 4, color = "black")
+
+combined_plot = plot1 / plot2
+combined_plot
 
 ```
+#### Top quantile PGS values for each sample
+```{r}
+M = 1000
+h2 = 0.5
+N = 50000
+n.samples = 1000
+t = 0.9
+n = 10000
+
+samples = PGS.sample.rankings(N, M, n, h2, n.samples, S = -1, t)$pgs.est 
+q.est = apply(samples, 2, quantile, probs = t) # calculate values at tth quantile at each columns
+plot(q.est) # variability in top PGS quantile value between samples
+
+```
+
+
 
 ## Change in rankings, correlation and proportion over t for different N within individuals
 
@@ -330,7 +409,7 @@ for (i in 1:length(Ns)){
   props[, i] = rankings$prop.over.t[1:4]  
   ranks[((i-1)*4 + 1): (i*4), ] = rankings$pgs.rankings[1:4, ]
   
-  # compute.rank.correlations <- function(pgs.ranks, n.pairs = 1000, seed = 42) {
+  # compute.rank.correlations = function(pgs.ranks, n.pairs = 1000, seed = 42) {
 }
 ```
 
