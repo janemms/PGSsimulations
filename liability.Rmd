@@ -8,9 +8,19 @@ date: "2025-06-17"
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+In this file we perform simulations using the liability threshold model. An individuals liability value is the sum of genetic effects and environmental effects. We use a lifetime disease prevalence value for a specific disease to obtain the liability threshold, and those individuals whose liability value exceeds the threshold have the disease. We first experiment by drawing both the environmental and the genetic effects from a normal distribution, to verify that out simulation does indeed produce the correct liability.
+
+To gain a more realistic understanding of the liability threshold model, we compute the Polygenic Scores for the individuals, and use the scaled PGS as the genetic component in the liability value. Here we consider a qualitative phenotype, so we must transform the genetic effects into the liability scale using the disease prevalence.
+
+We studied the uncertainty in the computed liability value caused by the uncertainty in the PGS bu keeping the environmental effects constant, and varying the genetic effects. It seems that there is major uncertainty in the liability value for about XX % of the individuals, as the proportion of the sampled liability values is in (0.4, 0.6).
+
+We looked into the risk of disease with a specific genotype by keeping the genetic effects constant and sampling the environmental effects for each of the individuals.
+
+Finally, we computed the prevalence of disease among the individuals in the top PGS quantile. [TEE SIMULAATIO] This was computed as the proportion of individuals in the top PGS quantile, whose liability values exceed the liability threshold.
+
 ```{r}
 N = 10000 # of individuals
-K = 0.1 # Ks <- c(0.01,0.05,0.1,0.2), lifetime prevalence of disease
+K = 0.1 # Ks = c(0.01,0.05,0.1,0.2), lifetime prevalence of disease
 M = 1000 # of SNPs
 h2 = 0.5 # heritability TODO: vary heritability
 ```
@@ -18,18 +28,15 @@ h2 = 0.5 # heritability TODO: vary heritability
 Liability model in Visscher et al.
 
 ```{r}
-U  <- seq(1/N,1-1/N,length=N) # sequence of probabilities between 0 and 1
-x  <- qnorm(U) # convert the probabilities to quantiles of the standard normal distribution (liability scores)
-t  <- qnorm(1-K) # threshold liability for disease based on prevalence K. People with liability > t have the disease
-R0 <- pnorm(x,mean=-t,sd=1,lower.tail = F) # risk distribution in the population, risk at each liability point x
+U  = seq(1/N,1-1/N,length=N) # sequence of probabilities between 0 and 1
+x  = qnorm(U) # convert the probabilities to quantiles of the standard normal distribution (liability scores)
+t  = qnorm(1-K) # threshold liability for disease based on prevalence K. People with liability > t have the disease
+R0 = pnorm(x,mean=-t,sd=1,lower.tail = F) # risk distribution in the population, risk at each liability point x
 z = dnorm(t) # density of standard normal distribution at t
 
 ```
 
--   Generate random genotypes
--   Somehow compute the liability for each individual, and a phenotype based on the liability
--   Compute PGSs for each individual
-    -   this would require both a training and a validation set before getting to evaluate the performance
+Generate genotypes for each individual and the genetic effects and their estimates for each SNP.
 
 ```{r}
 ps = runif(M, 0, 1) #  allele 1 frequencies for M SNPs
@@ -38,12 +45,8 @@ betas = rnorm(M, mean = 0, sd = sqrt(var)) # draw betas with variance var.neg
 betas.scaled = betas*K*(1-K)/z
 beta.est = rnorm(M, betas.scaled, sqrt(1/N *(1 - var))) # add noise proportional to sample size, formula from paper 3
 
-X <- matrix(rbinom(N * M, size = 2, prob = rep(ps, each = N)), nrow = N, ncol = M) # generate genotypes assuming allele frequencies follow HWE
+X = matrix(rbinom(N * M, size = 2, prob = rep(ps, each = N)), nrow = N, ncol = M) # generate genotypes assuming allele frequencies follow HWE
 ```
-
--   generate genetic effects G
--   generate environmental effects E
--   liability L = G + E
 
 #### Random genetic effects
 
@@ -60,7 +63,7 @@ cat("Simulated disease prevalence:", mean(disease.status), "\n")
 
 # Plot liability distribution
 library(ggplot2)
-df <- data.frame(Liability = L, Disease = factor(disease.status))
+df = data.frame(Liability = L, Disease = factor(disease.status))
 
 ggplot(df, aes(x = Liability, fill = Disease)) +
   geom_density(alpha = 0.5) +
@@ -69,44 +72,22 @@ ggplot(df, aes(x = Liability, fill = Disease)) +
        subtitle = paste("simulated disease prevalence =", round(mean(disease.status),3)),
        fill = "Disease Status") +
   theme_minimal()
+
+
+ggplot(df, aes(x = Liability, fill = Disease)) +
+  geom_histogram(alpha = 0.5, position = "identity", bins = 50) +
+  geom_vline(xintercept = t) +
+  labs(title = "Liability threshold model",
+       subtitle = paste("simulated disease prevalence =", round(mean(disease.status),3)),
+       fill = "Disease Status") +
+  theme_minimal()
+
 
 ```
 
 #### Genetic effects proportional to PGS
 
-Generate genotypes and compute PGS using PGS.uncertainty
-
-```{r}
-PGSs = PGS.uncertainty(N, M, h2, -1) # Generate genotypes and compute PGS
-PGS = PGSs$pgs
-PGS.scaled = scale(PGS) # scale PGSs to have mean = 0 and var = 1
-e = rnorm(N, 0, sqrt(1-h2)) # environmental effects
-g = PGS.scaled * sqrt(h2) # genetic effects 
-l = g + e # liability values
-
-length(which(l > t))
-disease.status = ifelse(l > t, 1, 0) # assign disease status
-```
-
-```{r}
-cat("Simulated disease prevalence:", mean(disease.status), "\n")
-
-# Plot liability distribution
-library(ggplot2)
-df <- data.frame(Liability = l, Disease = factor(disease.status))
-
-ggplot(df, aes(x = Liability, fill = Disease)) +
-  geom_density(alpha = 0.5) +
-  geom_vline(xintercept = t) +
-  labs(title = "Liability threshold model",
-       subtitle = paste("simulated disease prevalence =", round(mean(disease.status),3)),
-       fill = "Disease Status") +
-  theme_minimal()
-```
-
-#### Effect sizes transformed to the liability scale
-
-Generate genotypes and compute PGS using PGS.uncertainty.liability
+Generate genotypes and compute PGS using PGS.uncertainty.liability, transforming genetic effect sizes to liability scale.
 
 ```{r}
 source("PGSvariance.R")
@@ -127,7 +108,7 @@ cat("Simulated disease prevalence:", mean(disease.status), "\n")
 
 # Plot liability distribution
 library(ggplot2)
-df <- data.frame(Liability = l, Disease = factor(disease.status))
+df = data.frame(Liability = l, Disease = factor(disease.status))
 
 ggplot(df, aes(x = Liability, fill = Disease)) +
   geom_density(alpha = 0.5) +
@@ -136,19 +117,32 @@ ggplot(df, aes(x = Liability, fill = Disease)) +
        subtitle = paste("simulated disease prevalence =", round(mean(disease.status),3)),
        fill = "Disease Status") +
   theme_minimal()
+
+ ggplot(df, aes(x = Liability, fill = Disease)) +
+  geom_histogram(alpha = 0.5, position = "identity", bins = 50) +
+  geom_vline(xintercept = t) +
+  labs(title = "Liability threshold model",
+       subtitle = paste("simulated disease prevalence =", round(mean(disease.status),3)),
+       fill = "Disease Status") +
+  theme_minimal()
 ```
+
 #### Constant environmental effects with varying genetic effects
 
-With constant environmental effects for each individual, we sample genetic effect estimates and compute the genetic component using PGS for each sample. Look at which proportion of the liability values exceeds the threshold for each individual. 
+With constant environmental effects for each individual, we sample genetic effect estimates and compute the genetic component using PGS for each sample. Look at which proportion of the liability values exceeds the threshold for each individual.
 
 ```{r}
 source("PGSvariance.R")
-N = 10000 # of individuals
-K = 0.1 # Ks <- c(0.01,0.05,0.1,0.2), lifetime prevalence of disease
+Ns = c(10000, 50000, 100000, 200000) # of individuals
+K = 0.1 # Ks = c(0.01,0.05,0.1,0.2), lifetime prevalence of disease
 M = 1000 # of SNPs
 h2 = 0.5 # heritability 
 n.samples = 1000
+t = qnorm(1-K) # threshold liability for disease based on prevalence K. People with liability > t have the disease
 
+res = list() 
+
+for (N in Ns){
 # sample environmental effects
 e = rnorm(N, 0, sqrt(1-h2))
 
@@ -157,38 +151,46 @@ pgs.s = PGS.sample.uncertainty.liability(N, M, h2, S = -1, K, n.samples = 1000)
 pgs.samples = pgs.s$pgs.samples # a (n.samples x N) matrix: each column is a sample of PGSs for an individual
 
 # compute genetic effects for each pgs sample
-pgs.scaled = scale(t(pgs.samples)) # scale each row to have mean = 0 and var = 1, (N x n.samples) matrix
+pgs.samples = scale(t(pgs.samples)) # scale each row to have mean = 0 and var = 1, (N x n.samples) matrix
 g = pgs.scaled * sqrt(h2) # genetic effects, (N x n.samples) matrix of n.samples genetic effects for each individual
 
 # calculate liabilities, n.samples liabilities for each individual
 l = e + g # a (N x n.samples) matrix of b.samples liabilities for each individual
 
-t = qnorm(1-K) # threshold liability for disease based on prevalence K. People with liability > t have the disease
 over.t = 1 * (l > t) # a (N x n.samples) matrix of boolean values, indicating whether the liability value is over the threshold
 prop.over.t = rowSums(over.t)/n.samples # proportion of liability samples over threshold
 
 prop.over.t[order(prop.over.t, decreasing = TRUE)]
 
-sum( ( prop.over.t > 0.4 & prop.over.t < 0.6) * 1) # of individuals with proportion of liability values over threshold in [0.4, 0.6]
+mid.count = sum( ( prop.over.t > 0.4 & prop.over.t < 0.6) * 1) # of individuals with proportion of liability values over threshold in (0.4, 0.6)
+res[[as.character(N)]] = list(
+    prop.over.t = prop.over.t,
+    count.mid = mid.count, 
+    prop.mid = mid.count/N)
+}
+
 
 ```
 
-with N = 10 000, 440 individuals with proportion of liability values over threshold in [0.4, 0.6]
-with N = 100 000, 4240 individuals with proportion of liability values over threshold in [0.4, 0.6]
-with N = 300 000, 11 009 individuals with proportion of liability values over threshold in [0.4, 0.6]
-
--> compute proportion of individuals having proportion of samples over t in (0.4, 0.6) for different N
+```{r}
+rbind("N = 1000" = res$`10000`$prop.mid, "N = 50 000" = res$`50000`$prop.mid, "N = 100 000" = res$`1e+05`$prop.mid, "N = 200 000" = res$`2e+05`$prop.mid)
+```
 
 #### Constant genetic effects with varying environmental effects
 
 ```{r}
 source("PGSvariance.R")
 N = 10000 # of individuals
-K = 0.1 # Ks <- c(0.01,0.05,0.1,0.2), lifetime prevalence of disease
+K = 0.1 # Ks = c(0.01,0.05,0.1,0.2), lifetime prevalence of disease
 M = 1000 # of SNPs
-h2 = 0.5 # heritability 
+h2s = c(0.2, 0.5, 0.8) # heritability 
 n.samples = 1000
+t = qnorm(1-K) # threshold liability for disease based on prevalence K. People with liability > t have the disease
 
+risk.by.h2 = list() 
+decile.summary = data.frame()
+
+for (h2 in h2s){
 # sample N different genetic effects
 PGSs = PGS.uncertainty.liability(N, M, h2, -1, K) # Generate genotypes and compute PGS
 PGS = PGSs$pgs
@@ -201,32 +203,63 @@ e = matrix(rnorm(N*n.samples, 0, sqrt(1-h2)), nrow = N, ncol = n.samples)
 # calculate liabilities, n.samples liabilities for each individual
 l = e + g # a (N x n.samples) matrix of n.samples liabilities for each individual
 
-t = qnorm(1-K) # threshold liability for disease based on prevalence K. People with liability > t have the disease
 over.t = 1 * (l > t) # a (N x n.samples) matrix of boolean values, indicating whether the liability value is over the threshold
 prop.over.t = rowSums(over.t)/n.samples # proportion of liability samples over threshold: "risk of disease with this genotype"
-prop.over.t
 
+risk.by.h2[[as.character(h2)]] = prop.over.t # collect proportion of top PGS quantile samples for each individual
+
+cutpoints = quantile(g, probs = seq(0,1,0.1)) 
+deciles = cut(g, breaks = cutpoints, include.lowest = TRUE, labels = FALSE)
+  
+for (d in 1:10) {
+    idx = which(deciles == d)
+    mean.risk = mean(prop.over.t[idx])
+    sd.risk = sd(prop.over.t[idx])
+    decile.summary = rbind(decile.summary,
+                                data.frame(h2 = h2, decile = d, mean.risk = mean.risk, sd.risk = sd.risk))
+  }
 #prop.over.t[order(prop.over.t, decreasing = TRUE)]
 
 #sum( ( prop.over.t > 0.4 & prop.over.t < 0.6) * 1) # of individuals with proportion of liability values over threshold in [0.4, 0.6]
-
+}
 
 ```
 
-#### Liability of individuals in top PGS quantile
-cmd + option + i
-
+Plot mean risk of disease by PGS decile by heritability
 
 ```{r}
+colors = rainbow(length(h2s))
+plot(1:10, type = "n", ylim = c(0, 1), xlab = "PGS decile", ylab = "Mean risk",
+     main = "Mean disease disk by PGS decile")
+
+for (i in seq_along(h2s)) {
+  h2 = h2s[i]
+  subset = decile.summary[decile.summary$h2 == h2, ]
+  lines(subset$decile, subset$mean.risk, type = "b", col = colors[i], lwd = 2, pch = 16)
+}
+
+legend("topleft", legend = paste0("h2 = ", h2s), col = colors, lwd = 2, pch = 16)
+
+```
+
+
+
+#### Liability of individuals in top PGS quantile
+
+cmd + option + i
+
+```{r}
+source("PGSvariance.R")
 # Liability of individuals in the top PGS quantile
 N = 10000 # of individuals
-K = 0.01 # Ks <- c(0.01,0.05,0.1,0.2), lifetime prevalence of disease
+K = 0.1 # Ks = c(0.01,0.05,0.1,0.2), lifetime prevalence of disease
 M = 1000 # of SNPs
-h2 = 0.8 # heritability 
+h2 = 0.5 # heritability 
 tPGS = 0.9
-
+n.samples = 100
+t = qnorm(1 - K) # liability threshold
 # generate genotypes and effect sizes for individuals
-PGSs = PGS.uncertainty.liability(N, M, h2, -1, K) # Generate genotypes and compute PGS
+PGSs = PGS.sample.uncertainty.liability(N, M, h2, -1, K, n.samples) # Generate genotypes and compute PGS
 PGS = PGSs$pgs 
 g = as.vector(scale(PGS) * sqrt(h2)) # scaled genetic effects
 
@@ -241,7 +274,134 @@ hd = which(l > t) # individuals above threshold t
 length(intersect(ranks, hd))/length(ranks) # proportion of top quantile PGS individuals that have the disease
 ```
 
+```{r}
+
+N = 10000 # number of individuals
+M = 1000 # number of SNPs
+h2 = 0.5 # heritability on liability scale
+K = 0.1 # disease prevalence
+tPGS = 0.90 # top PGS quantile threshold
+S = -1 # selection parameter (ignored in this simple sim)
+
+PGSs = PGS.sample.uncertainty.liability(N, M, h2, -1, K, n.samples) # Generate genotypes and compute PGS
+PGS = PGSs$pgs 
+g = as.vector(scale(PGS) * sqrt(h2)) # scaled genetic effects
+
+e = rnorm(N, 0, sqrt(1 - h2)) # environmental component
+
+l = g + e # total liability
+
+t = qnorm(1 - K) # threshold for disease liability
+cases = which(l > t) # who has disease
+
+top.idx = which(N*tPGS < rank(PGS, ties.method = "first")) # individual PGSs in the top PGS quantile
+
+prevalence.top = mean(l[top.idx] > t) # prevalence in top PGS quantile
+
+prevalence.overall = mean(l > t) # overall prevalence
+
+cat("Prevalence :", prevalence.overall, "\n")
+cat("Prevalence in top", 100*(1 - tPGS), "% PGS quantile:", prevalence.top, "\n")
+
+```
+
+```{r}
+Ks = c(0.01, 0.05, 0.1, 0.2) # disease prevalences
+h2s = c(0.2, 0.5, 0.8) # heritabilities
+tPGSs = c(0.9, 0.95, 0.99) # PGS quantiles
+```
+
+```{r}
+# Load required packages
+library(data.table)
+
+# Function to simulate PGS and compute prevalence in top quantile
+simulate_pgs_liability <- function(N, M, h2, K, tPGS) {
+  # Liability threshold
+  t = qnorm(1 - K)
+  
+  # genotypes and effect sizes
+  PGSs = PGS.uncertainty.liability(N, M, h2, -1, K)  # Generate genotypes and compute PGS
+  PGS = PGSs$pgs 
+  PGS = as.vector(scale(PGS)) # mean 0, sd 1
+  g = PGS * sqrt(h2) # scaled genetic effect
+
+  e = rnorm(N, 0, sqrt(1 - h2)) # Environmental noise
+  
+  l = g + e # Liability
+  
+  disease = l > t # Disease status
+  
+  ranks = rank(PGS, ties.method = "first") # get individuals in top PGS quantile
+  top_group = which(ranks > N * (1 - tPGS))
+
+  top_disease = sum(disease[top_group])
+  prevalence_top = top_disease / length(top_group) # prevalence in top PGS quantile
+
+  list(
+    prevalence_top = prevalence_top,
+    enrichment = prevalence_top / K
+  )
+}
+
+# Parameters
+#Ns = 100000
+Ms = 1000
+Ks = c(0.01, 0.05, 0.1, 0.2)
+h2s = c(0.2, 0.5, 0.8)
+h2 = 0.5
+K = 0.05
+tPGSs = c(0.9, 0.95, 0.99)
+Ns = c(10000, 50000, 200000) # Different GWAS sizes
+
+reps = 10 # number of replicates for averaging
+
+# Initialize results
+results = data.table()
+
+# Simulation loop
+set.seed(123)
+for (N in Ns){
+#for (K in Ks) {
+  #for (h2 in h2s) {
+    for (tPGS in tPGSs) {
+      prevalences = numeric(reps)
+      enrichments = numeric(reps)
+      
+      for (r in 1:reps) {
+        sim = simulate_pgs_liability(N, Ms, h2, K, tPGS)
+        prevalences[r] = sim$prevalence_top
+        enrichments[r] = sim$enrichment
+      }
+
+      results = rbind(results, data.table(
+        K = K,
+        h2 = h2,
+        tPGS = tPGS,
+        prevalence_top = mean(prevalences),
+        enrichment = mean(enrichments),
+        sd_prevalence = sd(prevalences),
+        sd_enrichment = sd(enrichments)
+      ))
+    }
+  }
 
 
 
+print(results)
 
+
+library(ggplot2)
+
+ggplot(results, aes(x = tPGS, y = enrichment, color = factor(h2))) +
+  geom_line() +
+  facet_wrap(~K, scales = "free_y") +
+  labs(
+    title = "Disease Enrichment in Top PGS Quantiles",
+    x = "Top PGS Quantile (tPGS)",
+    y = "Enrichment Ratio (Prevalence Top / Prevalence Overall)",
+    color = "Heritability (h2)"
+  ) +
+  theme_minimal()
+
+```
