@@ -1,0 +1,216 @@
+---
+title: "RIskPlots"
+output: html_document
+date: "2025-07-07"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+PGS.true.vs.est <- function(N, n, M, h2, S = -1, n.samples){
+  # N: # of individuals in GWAS used to estimate effect sizes
+  # n: # of individuals whose PGS is to be computed
+  # M: # of SNPs
+  # h2: heritability
+  # S: relative contributions of common vs rare variants
+  # n.samples: # of samples where PGS and its variance are computed from
+  
+  ps = runif(M, 0.01, 0.99) #  allele 1 frequencies for M SNPs
+  var = h2/((2*ps*(1-ps))^S*M) # variance proportional to negative selection coefficient, scaled to match heritability h2 and M SNPs
+  betas = rnorm(M, mean = 0, sd = sqrt(var)) # draw betas with variance var
+  
+  # ESTIMATE TRUE GENETIC VALUES for n individuals
+  G = matrix(rbinom(n * M, size = 2, prob = rep(ps, each = n)), nrow = n, ncol = M) # generate genotypes for Np individuals at the M SNPs
+  G.filter = apply(G, 2, sd) > 0 # filter out SNPs with no variation
+  G = G[, G.filter]
+  G = scale(G, center = TRUE, scale = TRUE)
+  
+  gv = G %*% betas # compute genetic values
+  
+  # ESTIMATE GWAS EFFECT SIZES
+  beta.samples = matrix(nrow = n.samples, ncol = M) # collect n.samples of beta estimates
+  
+  for (i in 1:n.samples){
+    beta.samples[i,] = rnorm(M, betas, sqrt(1/N *(1 - var))) # add noise proportional to sample size, formula from paper 3
+  }
+
+  beta.samples = beta.samples[, G.filter] 
+  
+  pgs.samples = matrix(nrow = n.samples, ncol = n) # each column is a sample of PGSs for an individual
+  pgs.samples = beta.samples %*% t(G)
+  
+  pgs.est = G %*% rnorm(M, betas, sqrt(1/N *(1 - var)))
+  
+  return(list(gv = scale(gv), # a (n x 1) matrix of true genetic values for n individuals, scaled to mean 0 and unit variance
+              pgs.est = scale(pgs.est), # pgs point estimates, scaled to mean 0 and unit variance
+              pgs.samples = t(scale(t(pgs.samples))) # a (n.samples x n) matrix of n.samples PGS estimates for n individuals, scaled to mean 0 and unit variance
+              )) # a vector of true genetic values (in population) at each percentile
+  
+}
+
+```
+Laske jokaiselle yksilölle PGS estimaatti, ja sen keskimääräinen etäisyys todellisesta PGS arvosta (sd, ehkä myös range). Plottaa ykslöt ja katso niitä joilla suurin ero todellisesta GVstä.
+
+```{r}
+N = 500000
+n = 10000
+M = 1000
+h2 = 0.5
+n.samples = 100
+
+pgss = PGS.true.vs.est(N, n, M, h2, S = -1, n.samples)
+
+```
+
+```{r}
+pgs.pe = pgss$pgs.est
+pgs.true = pgss$gv
+pgs.diff = pgs.pe - pgs.true
+pgs.rel.diff = (pgs.pe - pgs.true)/pgs.true
+log.rel.diff = log(abs(pgs.rel.diff))
+dens.log.rel = density(log.rel.diff)
+#pgs.rel.diff
+library(ggplot2)
+
+# plot absolute differences
+dens = density(pgs.diff)
+dens.df = data.frame(x = dens$x, y = dens$y)
+ggplot(dens.df, aes(x = x, y = y)) +
+  geom_line(color = "black") +
+  geom_area(data = dens.df, 
+            fill = "skyblue", alpha = 0.6) + 
+  ggtitle("Absolute differences between true and estimated PGS values for 10 000 individuals") +
+  xlab("Difference between true and estimated PGS") +
+  ylab("Density") +
+  theme_minimal()
+
+# plot relative differences
+dens.rel = density(pgs.rel.diff)
+dens.rel.df = data.frame(x = dens.log.rel$x, y = dens.log.rel$y)
+ggplot(dens.rel.df, aes(x = x, y = y)) +
+  geom_line(color = "black") +
+  geom_area(data = dens.rel.df, 
+            fill = "skyblue", alpha = 0.6) + 
+  xlim(-0.5, 0.5) +
+  ggtitle("Relative differences between true and estimated PGS values for 10 000 individuals") +
+  xlab("Difference between true and estimated PGS") +
+  ylab("Density") +
+  theme_minimal()
+
+
+which(pgs.diff > 1)
+
+pgs.true[213]
+pgs.pe[213]
+  
+```
+
+
+
+# uncertainty in disease risk caused by uncertainty in PGS
+```{r}
+
+library(ggplot2)
+library(reshape2)
+
+N = 500000
+n = 10000
+M = 1000
+h2 = 0.5
+n.samples = 1000
+Ks = c(0.001, 0.01, 0.1) # disease prevalences
+
+pgs = PGS.true.vs.est(N, n, M, h2, S = -1, n.samples)
+
+pgs.samples = pgs$pgs.samples # a (n.samples x n) matrix of n.samples PGS estimates for n individuals
+pgs.gv = pgs$gv # true GVs
+
+for (K in Ks){
+  t = qnorm(1 - K)  # liability threshold for this prevalence  
+  true.risks = pnorm(t, pgs.gv, sqrt(1-h2), lower.tail = FALSE) # true risk of individuals, tail probability of genetic value -centered random environmental effects
+  # RISK OF DISEASE
+  sample.risks = pnorm(t, pgs.samples, sqrt(1 - h2), lower.tail = FALSE) # risk of disease for each PGS sample as a tail probability
+  
+  # INDICES by SD
+  sds = apply(pgs.samples, 2, sd)
+  risk.filter = true.risks > 0.01 
+  sd.ordered = order(sds, decreasing = TRUE)
+  sd.indices = sd.ordered[risk.filter[sd.ordered]][1:10] # interesting indices by pgs sd
+  
+  # top ten indices by risk sd
+  risk.sd = apply(sample.risks, 2, sd) 
+  risk.indices = order(risk.sd, decreasing = TRUE)[1:10] # interesting individuals by risk sd
+  
+  # Plot risk of disease for individuals with most variation in PGS
+  plot.risks = sample.risks[,sd.indices]
+  true.risks.i = true.risks[sd.indices]
+  
+  risks.long = melt(plot.risks, varnames = c("Sample", "PGS_Index"), value.name = "Risk")
+  risks.long$RiskPct = risks.long$Risk * 100
+  
+  print(ggplot(risks.long, aes(x = factor(PGS_Index), y = RiskPct)) +
+    geom_boxplot(fill = "lightblue") +
+    geom_point(data = data.frame(PGS_Index = factor(1:ncol(plot.risks)), Risk = true.risks.i * 100), 
+             aes(x = PGS_Index, y = Risk), 
+             color = "red", size = 2) +
+    labs(title = paste0("Risk of Disease for 10 individuals with most variation in PGS estimates, K = ", K), x = "PGS Index", y = "Risk of disease (%)") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle=45, hjust=1)))
+  
+  # Plot risk of disease for individuals with most variation in disease risk
+  plot.risks = sample.risks[,risk.indices]
+  true.risks.i = true.risks[risk.indices]
+  
+  risks.long = melt(plot.risks, varnames = c("Sample", "PGS_Index"), value.name = "Risk")
+  risks.long$RiskPct = risks.long$Risk * 100
+  
+  print(ggplot(risks.long, aes(x = factor(PGS_Index), y = RiskPct)) +
+    geom_boxplot(fill = "lightblue") +
+    geom_point(data = data.frame(PGS_Index = factor(1:ncol(plot.risks)), Risk = true.risks.i * 100), 
+             aes(x = PGS_Index, y = Risk), 
+             color = "red", size = 2) +
+    labs(title = paste0("Risk of Disease for 10 individuals with most variation in disease risk, K = ", K), x = "PGS Index", y = "Risk of disease (%)") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle=45, hjust=1)))
+
+  }
+
+```
+
+
+
+
+
+
+
+
+
+
+# True risk vs risk sd
+```{r}
+library(ggplot2)
+
+risk.sd = apply(sample.risks, 2, sd) # Compute sd of predicted risk across PGS samples
+
+risk.df = data.frame( # Create a data frame for plotting
+  TrueRisk = true.risks * 100, # convert to %
+  RiskSD = risk.sd * 100        
+)
+
+ggplot(risk.df, aes(x = TrueRisk, y = RiskSD)) + 
+  geom_point(alpha = 0.5, color = "blue") +
+  scale_x_log10() +  # log scale for rare diseases
+  scale_y_log10() +  # log scale for clarity
+  labs(
+    title = "Risk Uncertainty (SD) vs True Risk",
+    x = "True Risk of Disease (%)",
+    y = "SD of Predicted Risk (%)"
+  ) +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+
