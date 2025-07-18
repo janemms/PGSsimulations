@@ -1,7 +1,8 @@
-
+# ----------------------------------------------------------------------------------------------------
 # Function for testing individual PGS variability with different sample sizes, heritability, # of SNPs
-
-PGS.uncertainty <- function(N, M, h2, S = -1){
+# Calculates variance in PGS analytically from the variance in the beta estimates
+# ----------------------------------------------------------------------------------------------------
+PGS.uncertainty <- function(N, n, M, h2, S = -1){
   # N: # of individuals in GWAS used to estimate effect sizes
   # n: # of individuals whose PGS is to be computed
   # M: # of SNPs
@@ -16,7 +17,7 @@ PGS.uncertainty <- function(N, M, h2, S = -1){
   
   beta.est = rnorm(M, betas, sqrt(sigma.est)) # add noise proportional to sample size, formula from paper 3
   
-  X <- matrix(rbinom(N * M, size = 2, prob = rep(ps, each = N)), nrow = N, ncol = M) # generate genotypes for n individuals assuming allele frequencies follow HWE
+  X <- matrix(rbinom(n * M, size = 2, prob = rep(ps, each = n)), nrow = n, ncol = M) # generate genotypes for n individuals assuming allele frequencies follow HWE
   idx.filter = apply(X, 2, sd) > 0 # filter out SNPs with no variation
   X = X[, idx.filter]
   X = scale(X, center = TRUE, scale = TRUE)
@@ -26,10 +27,15 @@ PGS.uncertainty <- function(N, M, h2, S = -1){
   pgs = X %*% beta.est # compute PGS accounting for negative selection
   #return(dim(sigma.est))
   pgs.var = X^2 %*% sigma.est # variance in individual PGS estimates due to noise in the effect size estimates
-  
-  return(list(pgs = pgs, variance = pgs.var))
+  pgs.percentiles = quantile(pgs, probs = seq(0, 1, 0.01), na.rm = TRUE, names = TRUE)
+  return(list(pgs = pgs, variance = pgs.var, percentiles = pgs.percentiles))
 }
 
+# ----------------------------------------------------------------------------------------------------
+# Function for testing individual PGS variability with different sample sizes, heritability, # of SNPs
+# Calculates variance in PGS analytically from the variance in the beta estimates
+# Scales effect estimates to liability scale
+# ----------------------------------------------------------------------------------------------------
 PGS.uncertainty.liability <- function(N, M, h2, S = -1, K){
   # N: # of individuals
   # M: # of SNPs
@@ -43,7 +49,7 @@ PGS.uncertainty.liability <- function(N, M, h2, S = -1, K){
   
   t  <- qnorm(1-K) # threshold liability for disease based on prevalence K. People with liability > t have the disease
   z = dnorm(t) # density of standard normal distribution at t
-  betas.scaled = betas.neg*K*(1-K)/z # transform betas to liability scale
+  betas.scaled = betas.neg #*K*(1-K)/z # transform betas to liability scale
   sigma.est = 1/N *(1 - var.neg)
   beta.neg.est = rnorm(M, betas.scaled, sqrt(sigma.est)) # add noise proportional to sample size, formula from paper 3
   
@@ -61,6 +67,11 @@ PGS.uncertainty.liability <- function(N, M, h2, S = -1, K){
   return(list(pgs = pgs, variance = pgs.var))
 }
 
+# ----------------------------------------------------------------------------------------------------
+# Function for testing individual PGS variability with different sample sizes, heritability, # of SNPs
+# Calculates variance in PGS by sampling effect estimates and calculating PGS for each sample
+# Scales effect estimates to liability scale
+# ----------------------------------------------------------------------------------------------------
 PGS.sample.uncertainty.liability <- function(N, M, h2, S = -1, K, n.samples = 1000){
   # N: # of individuals
   # M: # of SNPs
@@ -75,7 +86,7 @@ PGS.sample.uncertainty.liability <- function(N, M, h2, S = -1, K, n.samples = 10
   
   t  <- qnorm(1-K) # threshold liability for disease based on prevalence K. People with liability > t have the disease
   z = dnorm(t) # density of standard normal distribution at t
-  betas.scaled = betas*K*(1-K)/z # transform betas to liability scale
+  betas.scaled = betas *K*(1-K)/z # transform betas to liability scale
   beta.samples = matrix(nrow = n.samples, ncol = M) # collect n.samples of beta estimates
   
   for (i in 1:n.samples){
@@ -100,32 +111,37 @@ PGS.sample.uncertainty.liability <- function(N, M, h2, S = -1, K, n.samples = 10
   return(list(pgs.samples = pgs.samples, pgs = pgs, variance = pgs.var))
 }
 
+# ----------------------------------------------------------------------------------------------------
+# Function for testing individual PGS variability with different sample sizes, heritability, # of SNPs
+# Calculates variance in PGS by sampling effect estimates and calculating PGS for each sample
+# ----------------------------------------------------------------------------------------------------
 
-PGS.sample.uncertainty <- function(N, M, h2, S = -1, n.samples = 1000){
+PGS.sample.uncertainty <- function(N, M, n, h2, S = -1, n.samples = 1000){
   # N: # of individuals
   # M: # of SNPs
+  # n: # of individuals whose PGS is to be computed
   # h2: heritability
   # S: relative contributions of common vs rare variants
   # n.samples: # of samples where PGS and its variance are computed from
   
   ps = runif(M, 0, 1) #  allele 1 frequencies for M SNPs
-  var.neg = h2/((2*ps*(1-ps))^S*M) # variance proportional to negative selection coefficient, scaled to match heritability h2 and M SNPs
-  betas.neg = rnorm(M, mean = 0, sd = sqrt(var.neg)) # draw true betas with variance var.neg
+  var = h2/((2*ps*(1-ps))^S*M) # variance proportional to negative selection coefficient, scaled to match heritability h2 and M SNPs
+  betas = rnorm(M, mean = 0, sd = sqrt(var)) # draw true betas with variance var.neg
   
   beta.samples = matrix(nrow = n.samples, ncol = M) # collect n.samples of beta estimates
   
   for (i in 1:n.samples){
-    beta.samples[i,] = rnorm(M, betas.neg, sqrt(1/N *(1 - h2/M))) # add noise proportional to sample size, formula from paper 3
+    beta.samples[i,] = rnorm(M, betas, sqrt(1/N *(1 - var))) # add noise proportional to sample size, formula from paper 3
   }
   
-  X <- matrix(rbinom(N * M, size = 2, prob = rep(ps, each = N)), nrow = N, ncol = M) # generate genotypes assuming allele frequencies follow HWE
+  X <- matrix(rbinom(n * M, size = 2, prob = rep(ps, each = n)), nrow = n, ncol = M) # generate genotypes assuming allele frequencies follow HWE
   
   idx.filter = apply(X, 2, sd) > 0 # filter out variants with no variation across individuals
   X.filtered = X[, idx.filter]
   beta.samples = beta.samples[, idx.filter] 
   X.scaled = scale(X.filtered) # standardize genotypes to have mean 0 and variance 1
   beta.mean = colMeans(beta.samples) # mean of the sampled beta estimates, acts as the point estimate
-  pgs.samples = matrix(nrow = n.samples, ncol = N) # each column is a sample of PGSs for an individual
+  pgs.samples = matrix(nrow = n.samples, ncol = n) # each column is a sample of PGSs for an individual
   
   pgs.samples = beta.samples %*% t(X.scaled)
 
@@ -133,17 +149,22 @@ PGS.sample.uncertainty <- function(N, M, h2, S = -1, n.samples = 1000){
   pgs = colMeans(pgs.samples) # point estimates for PGSs
   pgs.var = apply(pgs.samples, 2, var) # variances of individual PGS estimates
   
-  return(list(pgs = pgs, variance = pgs.var))
+  return(list(pgs = pgs,
+              pgs.samples = pgs.samples, # a (n.samples x n) matrix of n.samples PGS estimates for n individuals
+              variance = pgs.var))
 }
-
-PGS.sample.rankings <- function(N, M, n, h2, n.samples, S = -1, t = 0.9){
+# ----------------------------------------------------------------------------------------------------
+# Function for calculating sample PGS estimates and their relative rankings, and proportions
+# of ranking exceeding the PGS stratification quantile t
+# ----------------------------------------------------------------------------------------------------
+PGS.sample.rankings <- function(N, M, n, h2, n.samples = 1000, S = -1, t = 0.9){
   # N: # of individuals in GWAS used to estimate effect sizes
   # M: # of SNPs
   # n: # of individuals whose PGS is to be computed
   # h2: heritability
   # n.samples: # of PGS estimates to be sampled
   # S: relative contributions of common vs rare variants
-  # q: PGS quantile to be considered
+  # t: PGS quantile to be considered
   
   ps = runif(M, 0, 1) #  allele 1 frequencies for M SNPs
   var = h2/((2*ps*(1-ps))^S*M) # variance proportional to negative selection coefficient, scaled to match heritability h2 and M SNPs
@@ -170,7 +191,7 @@ PGS.sample.rankings <- function(N, M, n, h2, n.samples, S = -1, t = 0.9){
   
   # compute PGS estimates
   pgs.est = X %*% t(beta.samples) # PGS samples (n x n.samples)
-  pgs.mean = colMeans(pgs.est) # PGS point estimates for each individual
+  pgs.mean = rowMeans(pgs.est) # PGS point estimates for each individual
   
   # compute rankings of PGS estimates
   rankings = matrix(nrow = n, ncol = n.samples) # a (n x n.samples) matrix of rankings
@@ -182,7 +203,7 @@ PGS.sample.rankings <- function(N, M, n, h2, n.samples, S = -1, t = 0.9){
     
   }
   t.ind = ceiling(t*n) # cutoff index
-  rank.prop = apply(rankings, 1, function(x){mean(x > t.ind)x
+  rank.prop = apply(rankings, 1, function(x){mean(x > t.ind)
     #return(mean(above))
   })
   
@@ -196,7 +217,12 @@ PGS.sample.rankings <- function(N, M, n, h2, n.samples, S = -1, t = 0.9){
     prop.over.t = rank.prop # a vector of proportions of PGS values over t:th quantile for each individual
     )) 
 }
-  
+
+# ----------------------------------------------------------------------------------------------------
+# A function for calculating the analytical confidence intervals for individual PGSs, 
+# identifying individuals whose whole confidence interval is below/above the risk threshold,
+# and calculating the proportions of individuals "certain" above/below the threshold.
+# ----------------------------------------------------------------------------------------------------
 ordered.estimates <- function(pgs.est, pgs.var, t, rho){ # uses confidence intervals
   # pgs.est: list of PGS point estimates for each individual
   # pgs.var: list of variance of the PGS point estimate for each individual
@@ -260,6 +286,10 @@ ordered.estimates <- function(pgs.est, pgs.var, t, rho){ # uses confidence inter
   
 }
 
+# ----------------------------------------------------------------------------------------------------
+# A function for calculating the rank correlations of two random PGS samples for each individual, 
+# given a matrix of sample PGS rankings
+# ----------------------------------------------------------------------------------------------------
 compute.rank.correlations <- function(pgs.ranks, n.pairs = 1000, seed = 42) {
   set.seed(seed)
   #pgs.ranks = t(pgs.ranks) # n.sample rankings for the n indviduals, t(n x n.samples) matrix = (n.samples x n) matrix
@@ -275,6 +305,9 @@ compute.rank.correlations <- function(pgs.ranks, n.pairs = 1000, seed = 42) {
   return(corrs)
 }
 
+# ----------------------------------------------------------------------------------------------------
+# A function for generating genotype data, genetic effects and genetic effect estimates for M SNPs
+# ----------------------------------------------------------------------------------------------------
 generate.geno <- function(M, n, h2, S = -1) {
   # M: # of SNPs
   # n: # of individuals whose PGS is to be computed
@@ -301,6 +334,9 @@ return(list(
 ))
 }
 
+# ----------------------------------------------------------------------------------------------------
+# Function for calculating sample PGS estimates and their relative rankings given the genotypes and true genetic effect estimates.
+# ----------------------------------------------------------------------------------------------------
 PGS.sample.rankings.2 <- function(N, n.samples, X, var, beta, t = 0.9){
   # N: # of individuals in GWAS used to estimate effect sizes
   # n.samples: # of PGS estimates to be sampled
@@ -338,7 +374,6 @@ PGS.sample.rankings.2 <- function(N, n.samples, X, var, beta, t = 0.9){
   })
   
   return(list(
-    p = ps, # a vector of allele frequencies at M SNPs
     pgs = pgs.mean, # a vector of PGS point estimates for n individuals
     pgs.est = pgs.est, # a (n x n.samples) matrix of PGS samples
     pgs.rankings = rankings, # a (n x n.samples) matrix of rankings of n.samples PGS estimates for n individuals
