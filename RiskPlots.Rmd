@@ -9,6 +9,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ```{r}
+# a function for calculating true genetic values anf pgs estimates for a set of individuals
 PGS.true.vs.est <- function(N, n, M, h2, S = -1, n.samples){
   # N: # of individuals in GWAS used to estimate effect sizes
   # n: # of individuals whose PGS is to be computed
@@ -74,7 +75,7 @@ dens.log.rel = density(log.rel.diff)
 #pgs.rel.diff
 library(ggplot2)
 
-# plot absolute differences
+# plot absolute differences to gv
 dens = density(pgs.diff)
 dens.df = data.frame(x = dens$x, y = dens$y)
 ggplot(dens.df, aes(x = x, y = y)) +
@@ -86,7 +87,7 @@ ggplot(dens.df, aes(x = x, y = y)) +
   ylab("Density") +
   theme_minimal()
 
-# plot relative differences
+# plot relative differences to gv
 dens.rel = density(pgs.rel.diff)
 dens.rel.df = data.frame(x = dens.log.rel$x, y = dens.log.rel$y)
 ggplot(dens.rel.df, aes(x = x, y = y)) +
@@ -108,8 +109,24 @@ pgs.pe[213]
 ```
 
 
-
 # uncertainty in disease risk caused by uncertainty in PGS
+Miten epävarmuus PGS estimoinnissa välittyy sairastumisriskin arvioinnin epävarmuudeksi. 
+- Simuloin pgs otokset ja laskin riskit eri prevalensseille (GWAS N = 500 000, PGS n = 10 000, h² = 0.5, K = 0.001, 0.01, 0.1). Jokaiselle yksilölle laskin 1000 PGS-estimaattia ja vertasin näistä laskettuja sairastumisriskejä todelliseen, oikeilla betoilla laskettuun PGS:äön perustuvaan sairastumisriskiin.
+Katsoin riskejä tarkemmin kahdelle eri yksilöjoukolle:
+- 10 yksilöä, joilla PGS-estimaattien hajonta on suurin, ja
+- 10 yksilöä, joilla PGS:n avulla laskettujen sairastumisriskien hajonta on suurin.
+Piirsin boxplotit, joissa näkyy yksilöiden sairastumisriskin vaihtelu PGS-estimaattien välillä. Punaisella pisteellä on merkitty kunkin yksilön todellinen sairastumisriski. 
+
+Ensimmäisten kuvaajien yksilöillä, joilla PGS-estimaattien hajonta on suurinta, sairastumisriskin hajonta vaihtelee. Vaikka PGS hajonta olisi suurta, jos he sijoittuvat geneettisen komponentin osalta kauas liabiliteettirajasta, vaihtelu sairastumisriskissä ei ole yhtä suurta.
+
+Toisessa kuvaajassa yksilöillä, joiden sairastumisriski vaihtelee eniten, on kaikilla korkea todellinen sairastumisriski. Nämä yksilöt sijoittuvat geneettisen komponentin osalta jo lähelle liabiliteettirajaa, jolloin pienet muutokset PGS:ssö johtavat suuriin muutoksiin sairastumisriskissä.
+
+Molemmissa ryhmissä yksilöiden sairastumisriskissä on suurta vaihtelua, esim. esimmäisessä kuvassa yksilön 1 riski vaihtelee välillä 12.1 % - 50,4 %., ja toisessa kuvassa yksilön 1 riski on välillä 24,8 % - 66,8 %.
+Piirsin myös sairastumisriskin PGS:n funktiona, ja merkitsin siihen nämä kaksi yksilöjoukkoa. Suurimman PGS-hajonnan yksilöt sijoittuvat hajalleen koko käyrälle, mutta suurimman riskihajonnan yksilöt keskittyvät käyrän jyrkimpään kohtaan.
+
+Kuvat näyttävät, millaista vaihtelua yksittäisten yksilöiden kohdalla voi esiintyä niin PGS:ssä kuin sairastumisriskissä. Näissä kuvissa yksilöiden riski lasketaan suoraan PGS estimaatista, joten yksilöiden keskinäinen järjestys simulaatioissa ei vaikuta riskiestimaatteihin. 
+
+
 ```{r}
 
 library(ggplot2)
@@ -125,39 +142,64 @@ Ks = c(0.001, 0.01, 0.1) # disease prevalences
 pgs = PGS.true.vs.est(N, n, M, h2, S = -1, n.samples)
 
 pgs.samples = pgs$pgs.samples # a (n.samples x n) matrix of n.samples PGS estimates for n individuals
-pgs.gv = pgs$gv # true GVs
+pgs.gv = pgs$gv # true GVs of n individuals
 
 for (K in Ks){
   t = qnorm(1 - K)  # liability threshold for this prevalence  
   true.risks = pnorm(t, pgs.gv, sqrt(1-h2), lower.tail = FALSE) # true risk of individuals, tail probability of genetic value -centered random environmental effects
+  
   # RISK OF DISEASE
   sample.risks = pnorm(t, pgs.samples, sqrt(1 - h2), lower.tail = FALSE) # risk of disease for each PGS sample as a tail probability
   
-  # INDICES by SD
+  # TOP TEN INDICES BY PGS SD
   sds = apply(pgs.samples, 2, sd)
   risk.filter = true.risks > 0.01 
   sd.ordered = order(sds, decreasing = TRUE)
   sd.indices = sd.ordered[risk.filter[sd.ordered]][1:10] # interesting indices by pgs sd
+  #print(sd.indices)
   
-  # top ten indices by risk sd
+  # TOP TEN INDICES BY RISK SD
   risk.sd = apply(sample.risks, 2, sd) 
   risk.indices = order(risk.sd, decreasing = TRUE)[1:10] # interesting individuals by risk sd
-  
+  #print(risk.indices)
   # Plot risk of disease for individuals with most variation in PGS
   plot.risks = sample.risks[,sd.indices]
   true.risks.i = true.risks[sd.indices]
   
+  # PRINT SDs
+  risk.sd.i = risk.sd[sd.indices]
+  print(paste0("Risk sd of individuals with largest sd in PGS: ", 
+             paste(round(risk.sd.i, 5), collapse = ", ")))
+
+  risk.sd.i = risk.sd[risk.indices]
+  print(paste0("Risk sd of individuals with largest sd in risk: ", 
+             paste(round(risk.sd[risk.indices], 5), collapse = ", ")))
+  
   risks.long = melt(plot.risks, varnames = c("Sample", "PGS_Index"), value.name = "Risk")
   risks.long$RiskPct = risks.long$Risk * 100
   
+  real.indices = sd.indices # or risk.indices depending on plot
+  #risks.long$Real_Index = factor(real.indices[risks.long$PGS_Index])
+ 
+   # Print ranges for individuals with largest PGS variance
+  cat("Ranges of disease risk for individuals with largest PGS variance:\n")
+  for (i in seq_along(sd.indices)) {
+    idx <- sd.indices[i]
+    risks_i <- sample.risks[, idx]
+    range_i <- range(risks_i)
+    cat(sprintf("Individual %d: %.2f%% – %.2f%%\n", i, range_i[1]*100, range_i[2]*100))
+  }
+  # print boxplots of risks for top pgs sd individuals
   print(ggplot(risks.long, aes(x = factor(PGS_Index), y = RiskPct)) +
     geom_boxplot(fill = "lightblue") +
     geom_point(data = data.frame(PGS_Index = factor(1:ncol(plot.risks)), Risk = true.risks.i * 100), 
              aes(x = PGS_Index, y = Risk), 
              color = "red", size = 2) +
-    labs(title = paste0("Risk of Disease for 10 individuals with most variation in PGS estimates, K = ", K), x = "PGS Index", y = "Risk of disease (%)") +
-    theme_minimal() +
-    theme(axis.text.x = element_text(angle=45, hjust=1)))
+    labs(title = paste0("Risk of Disease for 10 individuals with most variation in PGS estimates, K = ", K), x = "Individual (ordered by PGS SD)", y = "Risk of disease (%)") +
+    theme_minimal())
+  ggsave(filename = paste0("PGS_variation_K_", K, ".png"), 
+       plot = last_plot(), 
+       width = 8, height = 5, dpi = 300, bg = "white")
   
   # Plot risk of disease for individuals with most variation in disease risk
   plot.risks = sample.risks[,risk.indices]
@@ -166,51 +208,549 @@ for (K in Ks){
   risks.long = melt(plot.risks, varnames = c("Sample", "PGS_Index"), value.name = "Risk")
   risks.long$RiskPct = risks.long$Risk * 100
   
+  real.indices = risk.indices # or risk.indices depending on plot
+  #risks.long$Real_Index = factor(real.indices[risks.long$PGS_Index])
+  
+  # Print ranges for individuals with largest risk variance
+  cat("Ranges of disease risk for individuals with largest disease risk variance:\n")
+  for (i in seq_along(risk.indices)) {
+    idx <- risk.indices[i]
+    risks_i <- sample.risks[, idx]
+    range_i <- range(risks_i)
+    cat(sprintf("Individual %d: %.2f%% – %.2f%%\n", i, range_i[1]*100, range_i[2]*100))
+  }
+  
+  # print boxplots of risks for top pgs sd individuals
   print(ggplot(risks.long, aes(x = factor(PGS_Index), y = RiskPct)) +
     geom_boxplot(fill = "lightblue") +
     geom_point(data = data.frame(PGS_Index = factor(1:ncol(plot.risks)), Risk = true.risks.i * 100), 
              aes(x = PGS_Index, y = Risk), 
              color = "red", size = 2) +
-    labs(title = paste0("Risk of Disease for 10 individuals with most variation in disease risk, K = ", K), x = "PGS Index", y = "Risk of disease (%)") +
-    theme_minimal() +
-    theme(axis.text.x = element_text(angle=45, hjust=1)))
+    labs(title = paste0("Risk of Disease for 10 individuals with most variation in disease risk, K = ", K), x = "Individual (ordered by risk SD)", y = "Risk of disease (%)") +
+    theme_minimal())
+  
+  ggsave(filename = paste0("Risk_variation_K_", K, ".png"), 
+       plot = last_plot(), 
+       width = 8, height = 5, dpi = 300, bg = "white")
 
   }
 
 ```
+Boxplotin korkeus kertoo miten epävarmuus PGS estimoinnissa siirtyy epävarmuuteen sairausriskin estimoinnissa.
+
+1) Valittu 10 yksilöä, joiden PGS varianssi on suurin. 
+-> Yksilöt joiden PGS estimaatti on epävarma, mutta saattavat sijoittua kaikkialle PGS jakaumalla. 
+
+2) Valittu 10 yksilöä, joiden PGS avulla laskettujen sairastumisriskien varianssi on suurin. 
+-> Yksilöt, joiden sairausriski on vaihtelee paljon eri PGS estimaattien välillä. Näille yksilöille pienet muutokset PGS arvossa aiheuttavat suuria muutoksia sairausriskissä. (sijoittuvat jyrkkään kohtaa liabiliteetti-käyrällä)
+-> Kertoo epävarmuudesta sairastumisriskissä. 
+
+ Kuvaajissa laskettu sairastumisriski yksilöille eri PGS estimaateilla, sekä "todellinen sairastumsiriski". Laskut on toistettu eri prevalensseille.
 
 
-
-
-
-
-
-
-
-
-# True risk vs risk sd
 ```{r}
-library(ggplot2)
+# Riskifunktio (cumulative normal)
+pgs.range = seq(min(pgs$gv) - 1, max(pgs$gv) + 1, length.out = 1000)
+risk.curve = pnorm(t, mean = pgs.range, sd = sqrt(1 - h2), lower.tail = FALSE)
 
-risk.sd = apply(sample.risks, 2, sd) # Compute sd of predicted risk across PGS samples
+plot(pgs.range, risk.curve, type = "l", col = "blue",
+     xlab = "PGS estimate", ylab = "Disease risk",
+     main = "Disease risk vs. PGS")
 
-risk.df = data.frame( # Create a data frame for plotting
-  TrueRisk = true.risks * 100, # convert to %
-  RiskSD = risk.sd * 100        
-)
+# Individuals with largest PGS variance
+points(pgs$gv[sd.indices], true.risks[sd.indices], col = "red", pch = 19)
+#text(pgs$pgs.est[sd.indices], true.risks[sd.indices],
+#     labels = sd.indices, pos = 3, col = "red")
 
-ggplot(risk.df, aes(x = TrueRisk, y = RiskSD)) + 
-  geom_point(alpha = 0.5, color = "blue") +
-  scale_x_log10() +  # log scale for rare diseases
-  scale_y_log10() +  # log scale for clarity
-  labs(
-    title = "Risk Uncertainty (SD) vs True Risk",
-    x = "True Risk of Disease (%)",
-    y = "SD of Predicted Risk (%)"
-  ) +
-  theme_minimal() +
-  theme(plot.title = element_text(hjust = 0.5))
+#  Individuals with largest variance in disease risk
+points(pgs$gv[risk.indices], true.risks[risk.indices], col = "darkgreen", pch = 17)
+#text(pgs$pgs.est[risk.indices], true.risks[risk.indices],
+#     labels = risk.indices, pos = 1, col = "darkgreen")
+
+legend("bottomright", legend = c("Top PGS variance", "Top disease risk variance"),
+       col = c("red", "darkgreen"), pch = c(19,17))
 
 ```
 
+
+
+### Uncertainty in individual PRS estimates
+
+- How have individuals PRSs been estimated, and how has their uncertainty been quantified?
+- Is there an existing way of estimating the uncertainty in individual PRS without relying on quantiles of individuals first?
+- What are all the sources of uncertainty in individual PRS estimation?
+
+**Ding, Y. et al** Large uncertainty in individual polygenic risk score estimation impacts PRS-based risk stratification
+
+- Estimate variance of individual's PRS with Bayesian PRS methods
+-> obtain credible intervals via posterior sampling
+- Provide an analytical estimator for the expectation of individuals PRS variance
+--> Authors recommend using the posterior samples 
+
+- Focused on estimating genetic value of an individual, not the phenotype.
+- Demonstrated that the individuals-level uncertainty can have large impact on risk stratification
+
+
+**Clifton, L. et al** Assessing agreement between different polygenic risk scores in the UK Biobank
+
+- Compared two PRSs for three diseases and compared their stability.
+- Found that: - the PRSs don't include all the same SNPs (or a representative)
+              - There are large differences in individual risk prediction between the PRSs
+--> Individuals could receive different medical advice depending on which PRS is used
+
+- PRSs compared in two ways: 
+  - consistency of selected SNPs and performance metrics
+  - correlation between each pair of PRSs ans how similar predictions they give individuals
+
+
+**Wang, X. et al** Impact of individual level uncertainty of lung cancer polygenic risk score (PRS) on risk stratification
+
+- Constructed two lung cancer PRS and studied the stability of the PRSs for individuals, and the impact on risk stratification.
+- The two PRSs were:
+  - the weighted sum of 16 GWS SNPs, and its CI through bootstrapping
+  - PRS constructed using LDpred2, and CI through posterior sampling (as in Ding et al.)
+    - Draw a sample of effect estimates from the posterior distribution of the causal effect size, compute PRS from each sample and obtain the credible interval
+    
+**Abramowitz, S. et al** Evaluating Performance and Agreement of Coronary Heart Disease Polygenic Risk Scores
+
+- Studied the consistency of individuals PRS prediction across PRSs that perform equivalently on population level
+- Found that the PRSs do not give consistent individual risk estimates
+
+- Considered PRSs from both published studies and new PRS developed from testing samples (total of 48 scores)
+- 20 % of individuals had at least one score in both the top and bottom 5 % risk
+- 52 % of individuals had at leas one score in top 5 %
+--> all of them had at least one score not in top 5 %
+
+
+- The study population included individuals from different ancestries
+--> the PRSs were adjusted for ancestry with a PCA based method
+
+- For each individuals the mean risk percentile and SD was calculated
+- CIs were obtained by bootstrapping
+
+- Pairwise correlations between PRSs varied from 0.028 to 0.98
+- scores from same publications were on average more strongly correlated (used same GWAS data)
+
+**Chuong, M. et al** Preventing premature deaths through polygenic risk scores
+
+
+**Muslimova, D. et al** Rank concordance of polygenic indices
+- empirically analyse individuals’ rank concordance across PGIs with different construction methods and discovery samples
+- focused on two polygenic traits: CVD and educational attainment
+
+- compare ranks of individuals in PGIs constructed using different discovery samples, and two methods: C + T and LDpred
+
+- show through simulations that measurement error from finite GWAS sample is main driver of rank discordance across PGIs
+
+
+**van Kippersluis, H. et al** Overcoming Attenuation Bias in Regressions using Polygenic Indices: A Comparison of Approaches
+
+**Ware, E. et al** Heterogeneity in polygenic scores for common human traits
+
+**Sun, J. et al** Translating polygenic risk scores for clinical use by estimating the confidence bounds of risk prediction
+
+
+
+### Uusi visualisointi
+
+
+
+```{r}
+# ---------------------------------------------------------------------------------------------------------------------
+# a function for computing disease risks (min, max and mean risk, range and variance) for pgs ranking positions over a sample of individuals 
+# ---------------------------------------------------------------------------------------------------------------------
+PGS.risk.by.ranking <- function(N, M, n, h2, K, n.samples, S = -1){
+  # N: # of individuals in GWAS used to estimate effect sizes
+  # M: # of SNPs
+  # n: # of individuals whose PGS is to be computed
+  # h2: heritability
+  # n.samples: # of PGS estimates to be sampled
+  # S: relative contributions of common vs rare variants
+  # q: PGS quantile to be considered
+  
+  t = qnorm(1 - K)
+  
+  ps = runif(M, 0, 1) #  allele 1 frequencies for M SNPs
+  var = h2/((2*ps*(1-ps))^S*M) # variance proportional to negative selection coefficient, scaled to match heritability h2 and M SNPs
+  betas = rnorm(M, mean = 0, sd = sqrt(var)) # draw betas with variance var.neg
+  
+  X <- matrix(rbinom(n * M, size = 2, prob = rep(ps, each = n)), nrow = n, ncol = M) # generate genotypes for n individuals assuming allele frequencies follow HWE (n x M)
+  
+  # filter out SNPs with no variation
+  idx.filter = apply(X, 2, sd) > 0
+  X = X[, idx.filter]
+  X = scale(X, center = TRUE, scale = TRUE)
+  betas = betas[idx.filter] 
+  
+  M.true = length(betas)
+  
+  sigma.est = 1/N *(1 - var) # effects of SNPs can be estimated with variance proportional to their allele frequency (rare alleles have larger effect sizes, and larger effect sizes can be estimated with smaller uncertainty)
+  sigma.est = sigma.est[idx.filter]
+  
+  # sample effect estimates
+  beta.samples = matrix(nrow = n.samples, ncol = M.true) # collect n.samples of beta estimates (n.samples x M (or less if filtered SNPs))
+  for (i in 1:n.samples){ # sample beta estimates and collect into beta.samples matrix
+    beta.samples[i,] = rnorm(M.true, betas, sqrt(sigma.est)) # add noise proportional to sample size, formula from paper 3
+  }
+  
+  # compute PGS estimates
+  pgs.est = X %*% t(beta.samples) # PGS samples (n x n.samples)
+  
+  # scale pgs estimates
+  pgs.sc = scale(pgs.est)
+  
+  # order PGS estimates within each sample (order each column of pgs.est)
+  pgs.ord = apply(pgs.sc, 2, sort) # now each column (sample) is sorted into increasing order
+  
+  # compute risk for each pgs estimate
+  risks = pnorm(t, pgs.ord, sqrt(1-h2), lower.tail = FALSE) # a (n x n.samples) matrix of risks
+  print(N)
+  print(dim(risks))
+  # compute minimum, maximum and mean risks for each n (point in the PGS distribution)
+  min.risks = apply(risks, 1, min)
+  max.risks = apply(risks, 1, max)
+  mean.risks = apply(risks, 1, mean)
+   
+  pgs.mean = colMeans(pgs.est) # PGS point estimates for each individual
+  
+  # compute rankings of PGS estimates
+  rankings = matrix(nrow = n, ncol = n.samples) # a (n x n.samples) matrix of rankings
+
+  
+  return(list(
+    pgs = pgs.mean, # a vector of PGS point estimates for n individuals
+    pgs.est = pgs.est, # a (n x n.samples) matrix of PGS samples
+    risks = risks,
+    min.risks = min.risks, 
+    max.risks = max.risks, 
+    mean.risks = mean.risks
+    )) 
+}
+
+```
+
+```{r}
+N = 100000
+M = 1000
+n = 1000 # vaihtele
+h2 = 0.2 # vaihtele
+K = 0.01 # vaihtele
+n.samples = 1000 # vai 100
+
+PGS.risk = PGS.risk.by.ranking(N, M, n, h2, K, n.samples)
+
+risks = PGS.risk$risks # (n x n.samples) matrix of risks 
+max(PGS.risk$max.risks[1:9900] - PGS.risk$min.risks[1:9900])
+
+t = qnorm(1 - K)
+pgs_thresh_percentile <- 1 - pnorm(t / sqrt(h2))
+pgs_thresh_rank <- pgs_thresh_percentile # already scaled
+
+cat(sprintf("PGS threshold at %.2f%% percentile for prevalence K=%.2f\n",
+            pgs_thresh_rank * 100, K * 100))
+
+# plot risks by PGS ranking
+
+library(ggplot2)
+
+# Data frame for min/max risks
+min_max_df <- data.frame(
+  Rank = (1:n) / n,  # Scale rank to [0,1]
+  Min = PGS.risk$min.risks,
+  Max = PGS.risk$max.risks
+)
+max_allowed_rank <- 0.999
+max_allowed_idx <- floor(n * max_allowed_rank)
+
+uncertainty <- PGS.risk$max.risks - PGS.risk$min.risks
+max_idx <- which.max(uncertainty[1:max_allowed_idx])       # index of max uncertainty
+max_rank <- max_idx / n                 # percentile (scaled rank)
+max_diff <- uncertainty[max_idx]        # max difference (risk range)
+max_min <- PGS.risk$min.risks[max_idx]  # min risk at this percentile
+max_max <- PGS.risk$max.risks[max_idx]  # max risk at this percentile
+
+PGS.sorted <- sort(PGS.risk$PGS)  # sorted PGS scores
+PGS.threshold <- PGS.sorted[max_idx]  # PGS value at max uncertainty
+
+# --- Print summary ---
+cat(sprintf(
+  "Max uncertainty at percentile %.1f%%: %.2f%% – %.2f%% (Δ=%.2f%%)\n",
+  max_rank * 100, max_min * 100, max_max * 100, max_diff * 100
+))
+cat(sprintf("PGS threshold at this percentile: %.4f\n", PGS.threshold))
+
+# Plot with annotation
+ggplot(min_max_df, aes(x = Rank)) +
+  geom_ribbon(aes(ymin = Min, ymax = Max), fill = "lightblue", alpha = 0.4) +
+  geom_line(aes(y = Min), color = "red", size = 1) +
+  geom_line(aes(y = Max), color = "blue", size = 1) +
+  geom_vline(xintercept = max_rank, linetype = "dashed", color = "black") + # vertical line
+  annotate("point", x = max_rank, y = PGS.risk$min.risks[max_idx], color = "red", size = 2) +
+  annotate("point", x = max_rank, y = PGS.risk$max.risks[max_idx], color = "blue", size = 2) +
+  
+  geom_vline(xintercept = pgs_thresh_rank, linetype = "dotted", color = "purple") + # prevalence threshold
+  labs(title = "Min and Max risks across PGS rankings",
+       subtitle = sprintf("Max uncertainty at %.1f%% percentile with risk between %.2f%% and %.2f%%", round(max_rank * 100,1), round(max_min*100,1), round(max_max*100, 1)),
+       x = "Relative PGS rank",
+       y = "Risk") +
+  theme_minimal()
+
+```
+
+```{r}
+library(ggplot2)
+library(grid)
+
+# a function for plotting min and max risks over pgs percentiles
+
+plot_PGS_uncertainty <- function(N.case = 100000, N.ctrl = 100000, M = 1000, n = 1000, h2 = 0.2, K = 0.01, n.samples = 100) {
+  
+  # compute effective sample size
+  phi = N.case/(N.ctrl + N.case) # phi: proportion of cases
+  N.eff = (N.case + N.ctrl) * phi * (1-phi)
+  
+  # Run the risk computation
+  PGS.risk <- PGS.risk.by.ranking(N.eff, M, n, h2, K, n.samples)
+  
+  # Prevalence liability threshold
+  t <- qnorm(1 - K)
+  pgs_thresh_percentile <- pnorm(t / sqrt(h2))
+  pgs_thresh_rank <- pgs_thresh_percentile
+  
+  min_max_df <- data.frame(
+    Rank = (1:n) / n,
+    Min = PGS.risk$min.risks,
+    Max = PGS.risk$max.risks
+  )
+  
+  max_allowed_rank <- 0.999
+  max_allowed_idx <- floor(n * max_allowed_rank)
+  
+  uncertainty <- PGS.risk$max.risks - PGS.risk$min.risks
+  max_idx <- which.max(uncertainty[1:max_allowed_idx])
+  max_rank <- max_idx / n
+  max_diff <- uncertainty[max_idx]
+  max_min <- PGS.risk$min.risks[max_idx]
+  max_max <- PGS.risk$max.risks[max_idx]
+  
+  PGS.sorted <- sort(PGS.risk$PGS)
+  PGS.threshold <- PGS.sorted[max_idx]
+  
+  cat(sprintf(
+    "Max uncertainty at percentile %.1d%%: %.2f%% – %.2f%% (Δ=%.2f%%)\n",
+   round(max_rank * 100), max_min * 100, max_max * 100, max_diff * 100
+  ))
+  cat(sprintf("PGS threshold at this percentile: %.4f\n", PGS.threshold))
+  cat(sprintf("PGS threshold percentile for prevalence (K=%.3f): %.2f%%\n", K, pgs_thresh_rank * 100))
+  
+  param_text <- paste(
+    sprintf("N.cases = %d", round(N.case)),
+    sprintf("N.ctrl = %d", round(N.ctrl)),
+    sprintf("M = %d", M),
+    sprintf("n = %d", n),
+    sprintf("h2 = %.2f", h2),
+    sprintf("K = %.3f", K),
+    sep = "\n"
+  )
+  
+  # tekstiboksin muotoilu
+  param_grob <- grobTree(
+    rectGrob(gp = gpar(fill = "white", col = "black", alpha = 0.8)),
+    textGrob(param_text, x = 0.02, y = 0.98, just = c("left", "top"),
+             gp = gpar(col = "black", fontsize = 10, fontface = "bold"))
+  )
+  
+  # Laske ymin ja ymax, vähän yli riskien ylärajan, tekstiboksin rajat
+  
+  ymax_pos <- max(min_max_df$Max) * 1.05
+  ymin_pos <- ymax_pos - 0.37
+  
+  p <- ggplot(min_max_df, aes(x = Rank)) +
+    geom_ribbon(aes(ymin = Min, ymax = Max), fill = "lightblue", alpha = 0.4) +
+    geom_line(aes(y = Min), color = "red", size = 1) +
+    geom_line(aes(y = Max), color = "blue", size = 1) +
+    annotate("point", x = max_rank, y = max_min, color = "red", size = 3) +
+    annotate("point", x = max_rank, y = max_max, color = "blue", size = 3) +
+    labs(
+      title = "Min and Max risks across PGS rankings",
+      subtitle = sprintf(
+        "Max uncertainty at %.1dth percentile with risk %.2f%%–%.2f%% ",
+        round(max_rank * 100), max_min * 100, max_max * 100
+      ),
+      x = "Relative PGS rank",
+      y = "Risk"
+    ) +
+    theme_minimal() +
+    annotation_custom(param_grob, xmin = 0, xmax = 0.2, ymin = ymin_pos, ymax = ymax_pos)
+  
+  print(p)
+  
+  invisible(list(
+    max_uncertainty_percentile = max_rank,
+    max_uncertainty_delta = max_diff,
+    pgs_threshold_percentile = pgs_thresh_rank,
+    pgs_threshold_value = PGS.threshold
+  ))
+}
+
+
+```
+Laskin useasta GWASista (n.samples) PGSt n yksilöille, järjestin ne ja laskin joukon sairastumisriskejä jokaiselle kohdalle PGS jakaumassa. Kuvaajissa on sinisellä sairastumisriskien maksimit ja punaisella minimit, ja pisteillä on merkitty kohta jossa näiden erotus on suurin.
+Esimerkiksi ensimmäisessä kuvassa parametreillä N = 500 000, h2 = 0.5, n = 10 000 ja K = 0.1, epävarmuus sairastumisriskissä on melko pientä. Toisessa kuvassa, kun heritabiliteetti on korkeampi (h2 = 0.8) ja tarkastellaan pienempää yksilöjoukkoa (n = 1000), epävarmuus sairastumisriskissä on yli 10 prosenttiyksikön luokkaa.
+Kolmannessa kuvassa näkyy esimerkki suuresta epävarmuudesta, kun tarkastellaa pientä yksilöjoukkoa (n = 100) ja sekä prevalenssi että heritabiliteetti ovat korkeat.
+
+Kun n = 1000 tai 10 000, epävarmuus pienenee kun K kasvaa. Kun yksilöjoukko on pieni (n = 100), niin epävarmuus on suurinta kun K = 0.01 (vs 0.1 tai 0.001).
+
+```{r}
+Ns = c(50000, 100000, 300000, 500000)
+N = 500000
+M = 1000
+ns = c(100, 1000, 10000)
+n = 1000
+h2s = c(0.2, 0.5, 0.8)
+h2 = 0.5
+Ks = c(0.001, 0.01, 0.1)
+samples = 100
+
+for (N in Ns) {
+  for (n in ns) {
+    for (h2 in h2s) {
+      for (K in Ks) {
+          plot_PGS_uncertainty(N, M, n, h2, K, samples)
+      }
+    }
+  }
+}
+
+
+#result <- plot_PGS_uncertainty(
+#  N = 100000,
+#  M = 1000,
+#  n = 1000,
+#  h2 = 0.5,
+#  K = 0.1,
+#  n.samples = 100
+#)
+
+```
+
+
+## With effective sample size
+
+```{r}
+N.cases = c(10000, 50000, 100000)
+N.ctrl = 100000
+#N = 500000
+M = 1000
+ns = c(100, 1000, 10000)
+n = 1000
+h2s = c(0.2, 0.5, 0.8)
+h2 = 0.5
+Ks = c(0.001, 0.01, 0.1)
+samples = 1000
+
+for (K in Ks) {
+  for (h2 in h2s) {
+    for (N.case in N.cases) {
+      for (n in ns) {
+          plot_PGS_uncertainty(N.case, N.ctrl, M, n, h2, K, samples)
+      }
+    }
+  }
+}
+
+
+```
+
+Kun n = 1000 tai 10 000, epävarmuus pienenee kun K kasvaa. Kun yksilöjoukko on pieni (n = 100), niin epävarmuus on suurinta kun K = 0.01 (vs 0.1 tai 0.001). 
+- kun n = 100, prevalenssilla 0.1 sairastuneita yksilöitä on noin 10, prevalenssilla 0.01 sairastuneita on noin 1 ja prevalenssilla 0.001 sairastuneita ei todennäköisesti ole. Siten prevalensseilla 0.1 ja 0.001 simulaatioissa näkyy melko pientä epävarmuutta sairastumisriskissä, mutta prevalenssilla 0.01 sairastuneita on joko 0 tai 1, mikä aiheuttaa korkeamman epävarmuuden riskiin.
+
+Muuten epävarmuus riskissä pienenee kun prevalenssi kasvaa, sillä kun sairastuneita on enemmän, pienet vaihtelut sairastuneiden lukumääärissä eivät aiheuta suurta epävarmuutta sairastumisriskiin.
+
+Tapausten lukumäärän kasvaessa epävramuus sairastumisriskissä pienenee. Kun tapausten määrä kasvaa, efektiivinen otoskoko kasvaa ja epävarmuus GWAS betoissa pienenee. Tällöin epävarmuus yksilöiden PGS estimaateissa pienenee ja myös epävarmuus sairastumsiriskissä pienenee. 
+
+Heritabiliteetin h2 kasvaessa riskikäyrä jyrkkenee, kun ympäristön vaikutus sairastumisriksiin pienenee. Simulaatioissa heritabiliteetin ja sairastumisriskin epävarmuuden välillä ei näy selkeää yhteyttä. 
+
+Yksilöjoukon koko n, jossa PGS lasketaan ja yksilöt järjestetään, vaikuttaa sairastumisriskin epävarmuuteen merkittävästi; epävarmuus on suurempaa kun n on pieni. Erityisesti kun n = 100, satunnaisuus vaikuttaa suuresti. 
+
+
+TODO: correlation between each two pgs rankings, heatmap
+
+Q: how to quantify the clinical utility of PRSs: in Genomics paper it was done by calculating reductions in mortality.
+
+
+```{r}
+plot_PGS_prob_threshold <- function(N.case = 100000, N.ctrl = 100000, M = 1000, n = 1000, 
+                                    h2 = 0.2, K = 0.01, n.samples = 100, clinical_threshold = 0.10) {
+  
+  # compute effective sample size
+  phi = N.case / (N.ctrl + N.case)
+  N.eff = (N.case + N.ctrl) * phi * (1 - phi)
+  
+  # Run the risk computation
+  PGS.risk <- PGS.risk.by.ranking(N.eff, M, n, h2, K, n.samples)
+  
+  # Compute threshold exceedance probability
+  exceed_prob <- rowMeans(PGS.risk$risks > clinical_threshold)
+  
+  risk_summary_df <- data.frame(
+    Rank = (1:n) / n,
+    Mean = rowMeans(PGS.risk$risks),
+    Lower = apply(PGS.risk$risks, 1, quantile, probs = 0.025),
+    Upper = apply(PGS.risk$risks, 1, quantile, probs = 0.975),
+    ExceedProb = exceed_prob
+  )
+  
+  # Plot
+  p <- ggplot(risk_summary_df, aes(x = Rank)) +
+    geom_ribbon(aes(ymin = Lower, ymax = Upper), fill = "lightblue", alpha = 0.4) +
+    geom_line(aes(y = Mean), color = "black", size = 1) +
+    geom_line(aes(y = clinical_threshold), linetype = "dashed", color = "red") +
+    geom_line(aes(y = ExceedProb), color = "purple", size = 1, linetype = "dotdash") +
+    scale_y_continuous(
+      name = "Absolute risk (black) / Probability of exceeding threshold (purple)",
+      sec.axis = sec_axis(~., name = "Exceedance Probability")
+    ) +
+    labs(
+      title = "Risk uncertainty and threshold exceedance across PGS rankings",
+      subtitle = sprintf("Clinical threshold: %.1f%% absolute risk", clinical_threshold * 100),
+      x = "Relative PGS rank",
+      y = "Risk"
+    ) +
+    theme_minimal()
+  
+  print(p)
+}
+
+```
+
+```{r}
+plot_PGS_prob_threshold(10000, 100000, 1000, 1000, 0.5, 0.01, 1000)
+```
+
+
+```{r}
+N.cases = c(10000, 50000, 100000)
+N.ctrl = 100000
+#N = 500000
+M = 1000
+ns = c(100, 1000, 10000)
+n = 1000
+h2s = c(0.2, 0.5, 0.8)
+h2 = 0.5
+Ks = c(0.001, 0.01, 0.1)
+samples = 1000
+
+for (K in Ks) {
+  for (h2 in h2s) {
+    for (N.case in N.cases) {
+      for (n in ns) {
+          plot_PGS_uncertainty(N.case, N.ctrl, M, n, h2, K, samples)
+      }
+    }
+  }
+}
+
+
+```
 
