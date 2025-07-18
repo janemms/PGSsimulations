@@ -1,0 +1,613 @@
+---
+title: "populationRisk"
+output: html_document
+date: "2025-06-30"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Risk in population
+We want to model the true polygenic risk in population. To do this we first generate the phenotypes and true genetic effects (betas). Using the true betas, we
+compute the polygenic score for a large number of individuals, yielding us the true genetic values of said individuals. We use large enough N to be able to precisely estimate the genetic values at the quantiles of the PGS distribution. 
+
+We test how large N would be needed, so that there is only little variation in the GV percentiles between simulations. We notice that with larger sample size the standard deviation in the sample percentiles remains smaller. An exception is the 0th and the 100th quantile, which are in practice the minimum and maximum value in the PGS data. With 400 000 individuals the PGS percentiles remain relatively stable between simulation.
+
+After this we estimate the genetic effects as if we would observe the effect estimates from a GWAS. Now we consider another sample of individuals (of size n), and estimate their polygenic scores using the estimated betas. We study the uncertainty in the PGS estimates in two ways:
+1) The uncertainty caused by the limited size n of the sample of individuals whose PGS is computed. If n is too small, small changes in the PGS value can cause major shifts in the ranking of an individual. The sample size n should represent the size of a realistic sample of individuals whose PGS were to be estimated in a real-life setting. 
+
+  To study the uncertainty caused by the limited sample size used to calculate the PGS ranks, we simulate PGS values and compute the values at percentiles for different n. We expect that with larger n, the PGS percentiles would estimate the GV percentiles better than with smaller n. We calculate the absolute difference between the simulated and the "true" percentiles, and observe that with n = 10 000 the absolute difference to the true percentiles remains small and varies less than with smaller n. 
+  
+2) The uncertainty caused by the uncertainty in the beta estimates obtained from the "GWAS". 
+
+For both of these factors we look at how the PGS values at quantiles are affected by the uncertainty. Is is crucial to consider how the PGS values at the top PGS quantile vary, as it may directly affect clinical decisions. To do this we simulate PGS estimates for different n, and look at which proportion of the top-PGS estimates are truly in the top-GV quantile. We should further study if the PGS estimates over- or underestimate the risk of individuals.
+
+TODO: consider ways to further look into the uncertainty 
+
+```{r}
+PGS.population.estimates <- function(N, Np, M, h2, S = -1, n, n.samples = 1000){
+  # N: # of individuals in GWAS used to estimate effect sizes
+  # Np: # of individuals used to estimate the true Genetic Values at quantiles
+  # n: # of individuals whose PGS is to be computed
+  # M: # of SNPs
+  # h2: heritability
+  # S: relative contributions of common vs rare variants
+  # n.samples: # of samples where PGS and its variance are computed from
+  
+  ps = runif(M, 0.01, 0.99) #  allele 1 frequencies for M SNPs
+  var = h2/((2*ps*(1-ps))^S*M) # variance proportional to negative selection coefficient, scaled to match heritability h2 and M SNPs
+  betas = rnorm(M, mean = 0, sd = sqrt(var)) # draw betas with variance var
+  sigma.est = 1/N *(1 - var) # effects of SNPs can be estimated with variance proportional to their allele frequency (rare alleles have larger effect sizes, and larger effect sizes can be estimated with smaller uncertainty)
+  
+  # ESTIMATE TRUE GENETIC VALUES
+  # generate genotypes for Np individuals at the M SNPs
+  G <- matrix(rbinom(Np * M, size = 2, prob = rep(ps, each = Np)), nrow = Np, ncol = M) # generate genotypes for n individuals assuming allele frequencies follow HWE
+  G.filter = apply(G, 2, sd) > 0 # filter out SNPs with no variation
+  G = G[, G.filter]
+  G = scale(G, center = TRUE, scale = TRUE)
+  
+  gv = G %*% betas # compute genetic values
+  
+  gv.percentiles = quantile(gv, probs = seq(0, 1, 0.01), na.rm = TRUE, names = TRUE)
+  
+  # ESTIMATE EFFECT SIZES
+  beta.est = rnorm(M, betas, sqrt(sigma.est)) # add noise proportional to sample size, formula from paper 3
+  
+  
+  # estimate PGSs for n individuals
+  G <- matrix(rbinom(n * M, size = 2, prob = rep(ps, each = n)), nrow = n, ncol = M) # generate genotypes for n individuals assuming allele frequencies follow HWE
+  idx.filter = apply(G, 2, sd) > 0 # filter out SNPs with no variation
+  G = G[, idx.filter]
+  G = scale(G, center = TRUE, scale = TRUE)
+  beta.est = beta.est[idx.filter]
+  sigma.est = sigma.est[idx.filter]
+  
+  pgs = G %*% beta.est # compute PGS accounting for negative selection
+  
+  pgs.percentiles = quantile(pgs, probs = seq(0, 1, 0.01), na.rm = TRUE, names = TRUE)
+  #return(dim(sigma.est))
+  pgs.var = G^2 %*% sigma.est # variance in individual PGS estimates due to noise in the effect size estimates
+  
+  return(list(gv = gv, # a (Np x 1) matrix of true genetic values for Np individuals (Np >> n)
+              pgs = pgs, # a (n x 1) matrix of PGSs calculated for n individuals 
+              gv.perc = gv.percentiles, # a vector of true genetic values (in population) at each percentile
+              pgs.perc = pgs.percentiles)) # a vector of pgs values at each percentile
+}
+```
+
+```{r}
+PGS.gv.estimates <- function(Np, M, h2, S = -1){
+  # Np: # of individuals used to estimate the true Genetic Values at quantiles
+  # M: # of SNPs
+  # h2: heritability
+  # S: relative contributions of common vs rare variants
+  
+  ps = runif(M, 0.01, 0.99) #  allele 1 frequencies for M SNPs
+  var = h2/((2*ps*(1-ps))^S*M) # variance proportional to negative selection coefficient, scaled to match heritability h2 and M SNPs
+  betas = rnorm(M, mean = 0, sd = sqrt(var)) # draw betas with variance var
+  
+  # ESTIMATE TRUE GENETIC VALUES
+  G = matrix(rbinom(Np * M, size = 2, prob = rep(ps, each = Np)), nrow = Np, ncol = M) # generate genotypes for Np individuals at the M SNPs
+  G.filter = apply(G, 2, sd) > 0 # filter out SNPs with no variation
+  G = G[, G.filter]
+  G = scale(G, center = TRUE, scale = TRUE)
+  
+  gv = G %*% betas # compute genetic values
+  
+  gv.percentiles = quantile(gv, probs = seq(0, 1, 0.01), na.rm = TRUE, names = TRUE)
+
+  return(list(gv = gv, # a (Np x 1) matrix of true genetic values for Np individuals (Np >> n)
+              gv.perc = gv.percentiles)) # a vector of true genetic values (in population) at each percentile
+  
+}
+```
+
+```{r}
+N = 500000
+Np = 500000
+M = 1000
+h2 = 0.5
+gv.sim = PGS.gv.estimates(N, Np, M, h2)
+```
+
+
+```{r}
+gv.sim$gv.perc["90%"]
+```
+### Determine sample size for stable GV percentiles
+```{r}
+N = 500000 # GWAS training sample size
+Nps = c(50000, 10000, 200000, 300000, 400000) # of individuals used to estimate the true genetic values in population
+M = 1000 # of SNPs
+h2 = 0.5 # heritability
+n = 1000 # of individuals whose PGS is calculated
+
+res = list()
+
+for (Np in Nps) {
+  gv.mat = matrix(nrow = 10, ncol = 101) # to store gv.percentiles
+  pgs.mat = matrix(nrow = 10, ncol = 101) # to store pgs.percentiles
+  
+  for (i in 1:10) {
+    sim = PGS.population.estimates(N, Np, M, h2, S = -1, n)
+    gv.mat[i, ] = sim$gv.perc
+    pgs.mat[i, ] = sim$pgs.perc
+  }
+  
+  # Store result for this Np
+  res[[as.character(Np)]] = list(
+    gv.perc = gv.mat,
+    pgs.perc = pgs.mat
+  )
+}
+
+```
+
+With Np = 400 000, the GV percentiles are stable between simulations, except for the extreme values at 0th and 100th percentile. 
+
+Plot standard deviations of the GV samples at percentiles with different sample sizes.
+```{r}
+
+percentiles = 0:100
+
+# colors for each Np value
+colors = rainbow(length(Nps))
+
+# empty plot
+plot(NULL, xlim = c(1, 99), ylim = c(0, 0.03),  # empty plot
+     xlab = "Percentile", ylab = "SD of GV Percentiles",
+     main = "Stability of Genetic Values across Np")
+
+for (i in seq_along(Nps)) { # loop through each Np and plot SD of gv.perc
+  Np_str = as.character(Nps[i])
+  sd_vals = apply(res[[Np_str]]$gv.perc, 2, sd)
+  lines(percentiles, sd_vals, col = colors[i], lwd = 2)
+}
+
+legend("topright", legend = paste("Np =", Nps),
+       col = colors, lwd = 2, title = "Sample Size")
+
+```
+
+```{r}
+# colors for each Np value
+colors = rainbow(length(Nps))
+
+# empty plot with xlim covering 0–100
+plot(NULL, xlim = c(0, 100), ylim = c(0, 0.03),  # extended xlim
+     xlab = "Percentile", ylab = "SD of GV Percentiles",
+     main = "Stability of Genetic Values across Np",
+     xaxs = "i")  # prevents padding beyond xlim
+
+for (i in seq_along(Nps)) { # loop through each Np and plot SD of gv.perc
+  Np_str = as.character(Nps[i])
+  sd_vals = apply(res[[Np_str]]$gv.perc, 2, sd)
+  lines(percentiles, sd_vals, col = colors[i], lwd = 2)
+}
+
+legend("topright", legend = paste("Np =", Nps),
+       col = colors, lwd = 2, title = "Sample Size")
+
+```
+
+
+Use mean of GV with Np = 400 000 as "true" values
+```{r}
+true.p = colMeans(res$`4e+05`$gv.perc)
+true.p
+```
+Estimate Polygenic Scores for a smaller sample of individuals, and compute PGS percentiles from the sample. Compare PGS estimates at percentiles to the true GV percentiles. Notice that the error and its variation decreases as the sample size increases.
+
+TODO: do several runs below
+
+```{r}
+source("PGSvariance.R")
+
+ns = c(100, 1000, 10000) # "realistic" sample sizes
+
+percentiles = 0:100
+colors = rainbow(length(ns)) # colors for each ns value
+
+# empty plot
+plot(NULL, xlim = c(0, 100), ylim = c(0, 0.2),  # empty plot
+     xlab = "Percentile", ylab = "absolute distance from true GV",
+     main = " ")
+
+for (i in seq_along(ns)) { # loop through each ns and plot pgs.p - true.p
+  Ns.str = as.character(ns[i])
+  pgs.p = PGS.uncertainty(N, ns[i], M, h2 = 0.5, S = -1)$percentiles
+  diff = abs(pgs.p - true.p)
+  lines(percentiles, diff, col = colors[i], lwd = 2)
+}
+
+legend("topright", legend = paste("n =", ns),
+       col = colors, lwd = 2, title = "Sample Size")
+
+#pgs.p = PGS.uncertainty(N, ns[3], M, h2 = 0.5, S = -1)$percentiles
+#plot(abs(pgs.p-true.p))
+
+```
+
+```{r}
+source("PGSvariance.R")
+
+ns = c(100, 1000, 10000)  # "realistic" sample sizes
+percentiles = 0:100
+colors = rainbow(length(ns)) # colors for each ns value
+n.reps = 100  # number of replicates per sample size
+
+plot(NULL, xlim = c(0, 100), ylim = c(0, 0.2),  # empty plot
+     xlab = "Percentile", ylab = "absolute distance from true GV",
+     main = "PGS uncertainty across replicates")
+
+for (i in seq_along(ns)) {
+  n_current = ns[i]
+  diffs = matrix(NA, nrow = num_reps, ncol = length(percentiles))
+  
+  for (r in 1:num_reps) {
+    pgs.p = PGS.uncertainty(N, n_current, M, h2 = 0.5, S = -1)$percentiles
+    diffs[r, ] = abs(pgs.p - true.p)
+  }
+  
+  # summary statistics
+  mean_diff = colMeans(diffs)
+  lower = apply(diffs, 2, quantile, probs = 0.025)  # 2.5% quantile
+  upper = apply(diffs, 2, quantile, probs = 0.975)  # 97.5% quantile
+  
+  # shaded area for 95% ci
+  polygon(c(percentiles, rev(percentiles)),
+          c(lower, rev(upper)),
+          col = adjustcolor(colors[i], alpha.f = 0.2), border = NA)
+  
+  # mean line
+  lines(percentiles, mean_diff, col = colors[i], lwd = 2)
+}
+
+legend("topright", legend = paste("n =", ns),
+       col = colors, lwd = 2, title = "Sample Size")
+
+```
+```{r}
+source("PGSvariance.R")
+
+ns = c(100, 1000, 10000)  # "realistic" sample sizes
+percentiles = 0:100
+colors = rainbow(length(ns)) # colors for each ns value
+n.reps = 100  # number of replicates per sample size
+
+plot(NULL, xlim = c(0, 100), ylim = c(0, 0.2),  # empty plot
+     xlab = "Percentile", ylab = "absolute distance from true GV",
+     main = "PGS uncertainty across replicates")
+
+for (i in seq_along(ns)) {
+  n_current = ns[i]
+  diffs = matrix(NA, nrow = num_reps, ncol = length(percentiles))
+  
+  for (r in 1:num_reps) {
+    pgs.p = PGS.uncertainty(N, n_current, M, h2 = 0.5, S = -1)$percentiles
+    diffs[r, ] = abs(pgs.p - true.p)
+  }
+  
+  # summary statistics
+  mean_diff = colMeans(diffs)
+  #lower = apply(diffs, 2, quantile, probs = 0.025)  # 2.5% quantile
+  #upper = apply(diffs, 2, quantile, probs = 0.975)  # 97.5% quantile
+  
+  # shaded area for 95% ci
+  #polygon(c(percentiles, rev(percentiles)),
+  #        c(lower, rev(upper)),
+  #        col = adjustcolor(colors[i], alpha.f = 0.2), border = NA)
+  
+  # mean line
+  lines(percentiles, mean_diff, col = colors[i], lwd = 2)
+}
+
+legend("topright", legend = paste("n =", ns),
+       col = colors, lwd = 2, title = "Sample Size")
+
+
+```
+
+
+Compare 90th, 95th and 99th percentile of PGS values to true GVs with ns = 100, 1000, 10 000.
+```{r}
+pgs.p = PGS.uncertainty(N, 100, M, h2 = 0.5, S = -1)$percentiles 
+pgs.p
+```
+
+```{r}
+true.p
+```
+
+### Error in estimating the GV percentiles
+
+The error in estimating true GVs at percentiles 90, 95 and 99 of the PGS distribution, across different sample sizes n. Each estimate describes the mean of absolute differences of the true GV at percentile and the estimated PGS at percentile, from 100 simulations. We get estimates on the average size of the error in estimating the GV percentile with the PGS percentile.
+```{r}
+ns = c(100, 1000, 10000) # "realistic" sample sizes
+inds = c(91, 96, 100)
+qs = true.p[inds] # 90th, 95th and 99th percentiles
+diffs = c()
+for (j in 1:length(qs)){
+  for (i in seq_along(ns)) { # loop through each ns and collect pgs.p - true.p
+    Ns.str = as.character(ns[i])
+    q.vals = c()
+    for (k in 1:100){ # collect ind[j]s quantile from 100 samples
+      q.vals = c(q.vals, PGS.uncertainty(N, ns[i], M, h2 = 0.5, S = -1)$percentiles[inds[j]])
+    }
+    diffs = c(diffs, mean(abs((qs[j] - (q.vals))/qs[j]))) # mean of relative absolute errors
+  }
+  
+}
+#diffs
+dim(diffs) = c(3,3)
+colnames(diffs) = c("90th", "95th", "99th")
+rownames(diffs) = c("n = 100", "n = 1000", "n = 10 000")
+round(abs(diffs), 5)
+```
+
+
+```{r}
+true.p # true GV percentiles in population
+# sample percentile values
+N = 500000
+M = 1000
+ns = c(100, 1000, 10000) # realistic sample sizes
+n.sim = 1000
+res = list()
+for (n in ns){
+  # percentiles from PGS.uncertainty
+  sims = matrix(nrow = n.sim, ncol = 3)
+  for (i in 1:n.sim){
+    sims[i, ] = PGS.uncertainty(N, n, M, h2, S = -1)$percentiles[c(91, 96, 100)]
+  }
+  res[[n]] = sims
+}
+
+```
+
+```{r}
+mat100 = res[[100]]
+mat1000 = res[[1000]]
+mat10000 = res[[10000]]
+true.q = true.p[c(91, 96, 100)] # true PGS values at percentiles 90, 95 and 99
+
+# mean of absolute deviation from the true quantiles
+summary = as.matrix(rbind(n100 = colMeans(abs(sweep(mat100, 2, true.q))), # substract true quantiles from each row of the matrix
+                n1000 = colMeans(abs(sweep(mat1000, 2, true.q))),
+                n10000 = colMeans(abs(sweep(mat10000, 2, true.q)))))
+colnames(summary) = c("90th", "95th", "99th")
+summary
+```
+The mean of absolute deviations from the true quantiles decreases with sample size, while the deviations are larger for the larger percentiles. This is intuitive, as there are less observations at the tails of the distribution, making the tail estimates less precise.
+
+
+Kuinka usein yksilö 90/95/99th PGS persentiilillä on todellisuudessa 90/95/99th persentiilillä?
+Simulate PGS estimates for different n, and look at which proportion of the top-PGS estimates are truly in the top-GV quantile. The proportion of correctly categorized PGS percentiles increases with samples size, and decreases with the PGS percentile. 
+
+```{r}
+thresholds = c(0.9, 0.95, 0.99) # Tail thresholds
+ns = c(100, 1000, 10000) # Sample sizes
+calibration = matrix(NA, nrow = length(ns), ncol = length(thresholds),
+                      dimnames = list(paste0("n=", ns), paste0("Top ", thresholds*100, "%")))
+true.q = true.p[c(91, 96, 100)] # true PGS values at percentiles 90, 95 and 99
+
+for (i in seq_along(ns)) {
+  sim.mat = res[[ns[i]]]  # Simulated predicted percentiles
+    
+    above.threshold = (sweep(sim.mat, 2, true.q, FUN = ">="))*1 # check if predicted percentile ≥ t
+    above.threshold
+    
+    calibration[i, ] = colMeans(above.threshold) # compute the proportion of simulation where predicted percentile is is ≥ true
+  
+}
+
+round(calibration, 4)
+
+```
+
+
+### Visualization of the distribution of individual PGS estimates
+```{r}
+N = 300000 # GWAS training sample size
+M = 1000 # of SNPs
+n = 1000 # of individuals whose PGS is to be computed
+h2 = 0.5 # heritability
+Np = 400000 # of individuals to estimate the population gv percentiles
+
+quantiles = PGS.gv.estimates(Np, M, h2)
+gv.quantile = quantiles$gv.perc[91]
+sd(quantiles$gv)
+
+```
+
+#### PGS distribution of an individual
+Plot the PGS distribution of an individual, with the 95% confidence interval shaded
+```{r}
+source("PGSvariance.R")
+
+
+pgs = PGS.sample.uncertainty(N, M, n, h2)
+pgs.samp = pgs$pgs.samples # a (n.samples x n) matrix of n.samples PGS estimates for n individuals
+
+individual = 30
+ind.pgs.samples = pgs.samp[, individual] # PGS samples of the individual, a (n.samples x 1) vector
+
+CI.low = quantile(ind.pgs.samples, probs = 0.025)
+CI.up = quantile(ind.pgs.samples, probs = 0.975)
+
+library(ggplot2)
+
+dens <- density(ind.pgs.samples)
+dens_df <- data.frame(x = dens$x, y = dens$y)
+
+# Mark the confidence interval region
+dens_df$in_CI <- with(dens_df, x >= CI.low & x <= CI.up)
+
+# Plot
+ggplot(dens_df, aes(x = x, y = y)) +
+  geom_line(color = "black") + # full density curve
+  geom_area(data = subset(dens_df, in_CI), 
+            fill = "skyblue", alpha = 0.6) + # fill only CI region
+  geom_vline(xintercept = gv.quantile, color = "red") +
+  annotate("text", x = gv.quantile, 
+           y = max(dens_df$y)*0.9, # slightly below top of plot
+           label = "True GV at 90 %", color = "red", angle = 90, vjust = -0.5, hjust = 1.1) +
+  ggtitle("Density Plot with Highlighted CI") +
+  xlab("PGS") +
+  ylab("Density") +
+  theme_minimal()
+
+
+```
+
+
+lisää todennäköisyys että ylittää thresholdin, miksi tuossa on true genetic value
+
+sama mutta rankingeillä: yksilön rankingien jakauma, thresholdilla 90th persentiili
+
+```{r}
+source("PGSvariance.R")
+N = 300000
+M = 1000
+n = 10000
+h2 = 0.5
+
+pgs = PGS.sample.rankings(N, M, n, h2)
+pgs.ranks = pgs$pgs.rankings # a (n x n.samples) matrix of n.samples PGS rankings for N individuals
+
+individual = 30
+ind.pgs.ranks = pgs.ranks[individual, ] # PGS rankings of the individual, a (1 x n.samples) vector
+mean.ranking = mean(ind.pgs.ranks) # mean of individuals PGS rankings
+
+CI.low = quantile(ind.pgs.ranks, probs = 0.025)
+CI.up = quantile(ind.pgs.ranks, probs = 0.975)
+
+library(ggplot2)
+
+
+dens <- density(ind.pgs.ranks)
+dens_df <- data.frame(x = dens$x, y = dens$y)
+
+# Mark the confidence interval region
+dens_df$in_CI <- with(dens_df, x >= CI.low & x <= CI.up)
+
+# Plot
+ggplot(dens_df, aes(x = x, y = y)) +
+  geom_line(color = "black") + # full density curve
+  geom_area(data = subset(dens_df, in_CI), 
+            fill = "skyblue", alpha = 0.6) + # fill only CI region
+  geom_vline(xintercept = 0.9*n, color = "red") +
+  annotate("text", x = 0.9*n, 
+           y = max(dens_df$y)*0.9, # slightly below top of plot
+           label = "Classification threshold at 90 %", color = "red", angle = 90, vjust = -0.5, hjust = 1.1) +
+  ggtitle("Density Plot with Highlighted CI") +
+  xlab("PGS") +
+  ylab("Density") +
+  theme_minimal()
+```
+
+```{r}
+source("PGSvariance.R")
+N = 300000
+M = 1000
+n = 10000
+h2 = 0.5
+
+pgs = PGS.sample.rankings(N, M, n, h2)
+pgs.ranks = pgs$pgs.rankings # a (n x n.samples) matrix of n.samples PGS rankings for N individuals
+```
+
+```{r}
+source("PGSvariance.R")
+
+# Scale rankings to [0,1]: 0 = best, 1 = worst
+pgs.ranks.scaled = (pgs.ranks) / n
+threshold.scaled = 0.9
+# Function to compute mean + CI for an individual
+get_individual_stats <- function(individual) {
+  ind.pgs.ranks = pgs.ranks.scaled[individual, ]
+  mean.ranking = mean(ind.pgs.ranks)
+  CI.low = quantile(ind.pgs.ranks, probs = 0.025)
+  CI.up = quantile(ind.pgs.ranks, probs = 0.975)
+  list(mean = mean.ranking, CI.low = CI.low, CI.up = CI.up)
+}
+
+# Categorize each individual
+categories = rep(NA, n)
+for (i in 1:n) {
+  stats = get_individual_stats(i)
+  if (stats$CI.up < threshold.scaled) {
+    categories[i] <- "below"
+  } else if (stats$CI.low > threshold.scaled) {
+    categories[i] <- "above"
+  } else if (stats$mean < threshold.scaled) {
+    categories[i] <- "touch_below"
+  } else {
+    categories[i] <- "touch_above"
+  }
+}
+
+# Get indices per category
+below_inds       <- which(categories == "below")
+above_inds       <- which(categories == "above")
+touch_below_inds <- which(categories == "touch_below")
+touch_above_inds <- which(categories == "touch_above")
+
+# Print example indices
+cat("Below threshold (entirely):", head(below_inds), "\n")
+cat("Above threshold (entirely):", head(above_inds), "\n")
+cat("Touches threshold, mean below:", head(touch_below_inds), "\n")
+cat("Touches threshold, mean above:", head(touch_above_inds), "\n")
+
+```
+
+
+```{r}
+individual = 32
+ind.pgs.ranks = pgs.ranks[individual, ] # PGS rankings of the individual, a (1 x n.samples) vector
+
+# Scale rankings to [0,1] where 0 = best, 1 = worst
+ind.pgs.ranks.scaled <- (ind.pgs.ranks / n) * 100
+
+# Calculate mean and confidence interval on the scaled data
+mean.ranking.scaled <- mean(ind.pgs.ranks.scaled)
+CI.low.scaled <- quantile(ind.pgs.ranks.scaled, probs = 0.025)
+CI.up.scaled <- quantile(ind.pgs.ranks.scaled, probs = 0.975)
+
+library(ggplot2)
+
+# Compute density on scaled rankings
+dens_scaled <- density(ind.pgs.ranks.scaled)
+dens_df <- data.frame(x = dens_scaled$x, y = dens_scaled$y)
+
+# Mark the confidence interval region
+dens_df$in_CI <- with(dens_df, x >= CI.low.scaled & x <= CI.up.scaled)
+
+# Plot
+ggplot(dens_df, aes(x = x, y = y)) +
+  geom_line(color = "black") + # full density curve
+  geom_area(data = subset(dens_df, in_CI), 
+            fill = "skyblue", alpha = 0.6) + # fill only CI region
+  geom_vline(xintercept = 90, color = "red") + # threshold at 90% percentile
+  annotate("text", x = 90, 
+           y = max(dens_df$y)*0.9, # slightly below top of plot
+           label = "Classification threshold", 
+           color = "red", angle = 90, vjust = -0.5, hjust = 1.1) +
+ geom_segment(aes(x = mean.ranking.scaled, xend = mean.ranking.scaled, 
+                 y = 0, yend = max(y)),
+             color = "blue", linetype = "dashed") +
+annotate("text", x = mean.ranking.scaled, y = max(dens_df$y)*0.8, 
+         label = sprintf("Mean percentile: %2.fth", mean.ranking.scaled),
+         color = "blue", angle = 90, vjust = -0.5, hjust = 1.1) +
+  ggtitle("Individuals PGS ranking distribution with highlighted 95 % CI") +
+  xlab("PGS Percentile") +
+  ylab("Density") +
+  theme_minimal()
+
+#ggsave(filename = paste0("individual-ranking-distribution-uncertain-above", ".png"), 
+#       plot = last_plot(), 
+#       width = 8, height = 5, dpi = 300, bg = "white")
+
+```
+
