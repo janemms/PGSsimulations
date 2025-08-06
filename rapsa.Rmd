@@ -27,14 +27,14 @@ In research applications, individuals PGS is compared to a reference threshold v
 We have looked into the uncertainty in the PGS estimates in multiple ways:
 1) Studied the effect of heritability and GWAS training sample size (used to obtain estimates for genetic effects) to the individual PGS variance analytically.
 
-2) Studied the proportion of certain-above -threshold inividuals among those whose PGS point estimate exceeds the threshold, as a function of GWAS sample side and heritability.
+2) Studied the proportion of certain-above -threshold inividuals among those whose PGS point estimate exceeds the threshold, as a function of GWAS sample size and heritability.
 
 We have studied the variability in individuals ranks by:
-1) Sampling PGS estimates for individuals, and computing rankings for the individuals in each sample, we have studies the mean ranking of an individual, as well as the range of rankings.
+1) Sampling PGS estimates for individuals, and computing rankings for the individuals in each sample, we have studied the mean ranking of an individual, as well as the range of rankings.
 
 2) For each individual we have studied the proportion of rankings in the top-PGS quantile
 
-Inrelation to the liability threshold model of disease susceptibility, we have:
+In relation to the liability threshold model of disease susceptibility, we have:
 1) Studied the risk of disease with specific genotype, by sampling environmental effects. 
 
 2) Computed the mean risk of disease by PGS decile, studying the liabilities of the individuals stratified by PGS.
@@ -57,11 +57,11 @@ Polygenic risk scores (PRS) are increasingly used to estimate an individual’s 
 
 PRSs are mainly usen in two ways: (1) ranking individuals withing a cohort by their PRS and comparing the relative disease risk across quantiles, and (2) estimating individuals absolute disease risk by comparing to the standardized PRSs in a reference population.
 Both approaches are sensitive to uncertainty arising from limited GWAS sample size and uncertainty about causal variants.
-This report summarizes simulations exploring how such uncertainty propagates to PRS estimates, individual rankings, and disease risk predictions.
+This report summarizes simulations exploring how such uncertainty propagates to individual's PRS estimates, individual rankings, and disease risk predictions.
 
 ### Methods
 #### PGS computation
-To calculate PRSs for a set of individuals over M SNPs, we first generate allele frequencies for said SNPs by drawing them from uniform distribution. We simulate genetic effects for each variant (betas) by drawing them from a normal distribution with mean zero and variance $ h2/((2*ps*(1-ps))^S*M)$, with S = - 0.75, as in [1]. This way the variance explained by the variants is scaled to match heritability h2, and more common variants have smaller effects. We assume the M SNPs to be independent, mening we do not consider LD.
+To calculate PRSs for a set of individuals over M SNPs, we first generate allele frequencies for said SNPs by drawing them from uniform distribution. We simulate genetic effects for each variant (betas) by drawing them from a normal distribution with mean zero and variance $ h2/((2*ps*(1-ps))^S*M)$, with S = - 0.75, as in [1]. This way the variance explained by the variants is scaled to match heritability h2, and more common variants have smaller effects. We assume the M SNPs to be independent, meaning we do not consider LD.
 
 Assuming the genotypes are standardized to have mean zero and unit variance, we simulate the genetic effects obtained from GWAS by adding random noise around the true genetic effects. Following [2], we draw the genetic effect estimate for each variant from a normal distribution centered at the true genetic effect, with variance $1/N *(1 - h2/((2*ps*(1-ps))^S*M))$.
 
@@ -79,13 +79,15 @@ PGS.uncertainty <- function(N, M, n, h2, S = -0.75, n.samples = 1000){
   # S: relative contributions of common vs rare variants
   # n.samples: # of samples where PGS and its variance are computed from
   
-  ps = runif(M, 0, 1) #  allele 1 frequencies for M SNPs
+  ps = runif(M, 0.001, 0.999) #  allele 1 frequencies for M SNPs
   var = h2/((2*ps*(1-ps))^S*M) # variance proportional to negative selection coefficient, scaled to match heritability h2 and M SNPs
-  betas = rnorm(M, mean = 0, sd = sqrt(var)) # draw true betas with variance var.neg
+  betas = rnorm(M, mean = 0, sd = sqrt(var)) # draw true betas with variance var
+  betas = betas * sqrt(2 * ps * (1 - ps)) # scale betas
+  
   
   beta.samples = matrix(nrow = n.samples, ncol = M) # collect n.samples of beta estimates
   
-  sigma.est = 1/N *(1 - var) # effects of SNPs can be estimated with variance proportional to their allele frequency (rare alleles have larger effect sizes, and larger effect sizes can be estimated with smaller uncertainty)
+  sigma.est = 1/N *(1 - (var*2*ps*(1-ps))) # effects of SNPs can be estimated with variance proportional to their allele frequency (rare alleles have larger effect sizes, and larger effect sizes can be estimated with smaller uncertainty), scaled
   
   for (i in 1:n.samples){
     beta.samples[i,] = rnorm(M, betas, sqrt(sigma.est)) # add noise proportional to sample size, formula from paper 3
@@ -111,7 +113,7 @@ PGS.uncertainty <- function(N, M, n, h2, S = -0.75, n.samples = 1000){
   
   pgs = colMeans(pgs.samples) # point estimates for PGSs
   #pgs.var = X^2 %*% sigma.est # variance in individual PGS estimates due to noise in the effect size estimates
-  pgs.var = rowSums((X.filtered^2) * sigma.est) #   PITÄISIKÖ LASKEA SKAALATUILLA GENOTYYPEILLÄ??????
+  pgs.var = rowSums((X.scaled^2) * sigma.est) # PGS variance calculated analytically
   pgs.sample.var = apply(pgs.samples, 2, var) # variances of individual PGS estimates
   
   return(list(gv = gv, # true genetic values
@@ -124,7 +126,7 @@ PGS.uncertainty <- function(N, M, n, h2, S = -0.75, n.samples = 1000){
 ```
 
 #### Liability threshold model
-We perform simulations using the liability threshold model, following [3]. An individuals liability value is the sum of genetic effects and environmental effects. We use a lifetime disease prevalence value for a specific disease to obtain the liability threshold, and those individuals whose liability value exceeds the threshold have the disease. 
+We perform simulations using the liability threshold model, following [3]. An individuals liability value is the sum of genetic effects and environmental effects. We use a lifetime disease prevalence value for a specific disease to obtain the liability threshold, and the individuals whose liability value exceeds the threshold have the disease. 
 
 To gain a more realistic understanding of the liability threshold model, we compute the Polygenic Scores for the individuals, and use the scaled PGS as the genetic component in the liability value. Here we consider a qualitative phenotype, so we must transform the genetic effects into the liability scale using the disease prevalence.
 ```{r}
@@ -180,28 +182,28 @@ In the simulations we explore the uncertainty by varying heritability h2, GWAS s
 ### Simulations
 
 #### Liability threshold model simulations
-We studied the uncertainty in the computed liability value caused by the uncertainty in the PGS bu keeping the environmental effects constant, and varying the genetic effects. It seems that there is major uncertainty in the liability value for about XX % of the individuals, as the proportion of the sampled liability values is in (0.4, 0.6).
+? We studied the uncertainty in the computed liability value caused by the uncertainty in the PGS by keeping the environmental effects constant, and varying the genetic effects. It seems that there is major uncertainty in the liability value for about XX % of the individuals, as the proportion of the sampled liability values is in (0.4, 0.6). ?
+
+? ONKO EDES JÄRKEVÄ SIMULAATIO ?
 
 We looked into the risk of disease with a specific genotype by keeping the genetic effects constant and sampling the environmental effects for each of the individuals.
 We keep the genetic effects constant and sample environmental effects to get a disease risk estimate for each individual.
 ```{r}
-N = 100000 # of individuals
-Ks = c(0.1, 0.01, 0.001) # lifetime prevalence of disease
+N = 100000 # GWAS sample size
+Ks = c(0.1, 0.01, 0.001) # lifetime prevalences of disease
 M = 1000 # of SNPs
-h2s = c(0.2, 0.5, 0.8) # heritability 
-n = 1000
+h2s = c(0.2, 0.5, 0.8) # heritabilities
+n = 1000 
 
 risk.by.K = list()
-decile.summary = data.frame()
+percentile.summary = data.frame()
 
 for (K in Ks) {
-  t = qnorm(1 - K)  # liability threshold for this prevalence
-  # threshold liability for disease based on prevalence K. People with liability > t have the disease
+  t = qnorm(1 - K) # threshold liability for disease based on prevalence K. People with liability > t have the disease
 
   risk.by.h2 = list() 
 
-  for (h2 in h2s){
-  # sample N different genetic effects
+  for (h2 in h2s){ 
   PGSs = PGS.uncertainty(N, M, n, h2) # Generate genotypes and compute PGS
   PGS = PGSs$pgs
   PGS.scaled = scale(PGS) # scale PGSs to have mean = 0 and var = 1
@@ -210,18 +212,17 @@ for (K in Ks) {
   # sample environmental effects: tail probability = risk of disease
   prop.over.t = pnorm(t, g, sqrt(1-h2), lower.tail = FALSE)
   
-  # calculate liabilities, n.samples liabilities for each individual
   risk.by.h2[[as.character(h2)]] = prop.over.t # collect proportion of top PGS quantile samples for each individual
   
-  cutpoints = quantile(g, probs = seq(0,1,0.01)) 
-  deciles = cut(g, breaks = cutpoints, include.lowest = TRUE, labels = FALSE)
+  cutpoints = quantile(g, probs = seq(0,1,0.01)) # divide into percentiles
+  percentiles = cut(g, breaks = cutpoints, include.lowest = TRUE, labels = FALSE)
     
   for (d in 1:100) {
-      idx = which(deciles == d)
+      idx = which(percentiles == d) # 
       mean.risk = mean(prop.over.t[idx])
       sd.risk = sd(prop.over.t[idx])
-      decile.summary = rbind(decile.summary,
-                      data.frame(K = K, h2 = h2, decile = d, mean.risk = mean.risk, sd.risk = sd.risk))
+      percentile.summary = rbind(percentile.summary,
+                      data.frame(K = K, h2 = h2, percentileile = d, mean.risk = mean.risk, sd.risk = sd.risk))
 }
   }
   risk.by.K[[as.character(K)]] = risk.by.h2
@@ -233,7 +234,7 @@ Plot mean risk of disease by PGS decile by heritability
 ```{r}
 colors = rainbow(length(Ks))
 for (K in Ks) {
-  subset.K = decile.summary[decile.summary$K == K, ] # decile summary for current K
+  subset.K = percentile.summary[percentile.summary$K == K, ] # decile summary for current K
   plot(1:100, type = "n", ylim = c(0, max(subset.K$mean.risk)), 
        xlab = "PGS decile", ylab = "Mean risk",
        main = paste0("Mean disease risk by PGS decile (K = ", K, ")"))
@@ -241,7 +242,7 @@ for (K in Ks) {
   for (i in seq_along(h2s)) {
     h2 = h2s[i]
     subset.h2 = subset.K[subset.K$h2 == h2, ]
-    lines(subset.h2$decile, subset.h2$mean.risk, type = "b", 
+    lines(subset.h2$percentile, subset.h2$mean.risk, type = "b", 
           col = colors[i], lwd = 2, pch = 16)
   }
 
@@ -253,14 +254,15 @@ for (K in Ks) {
 Finally, we computed the prevalence of disease among the individuals in the top PGS quantile. This was computed as the proportion of individuals in the top PGS quantile, whose liability values exceed the liability threshold.
 ```{r}
 
-N = 10000 # number of individuals
+N = 10000 # GWAS sample size
 M = 1000 # number of SNPs
+n = 10000 # target sample size
 h2 = 0.5 # heritability on liability scale
 K = 0.1 # disease prevalence
 tPGS = 0.90 # top PGS quantile threshold
-S = -1 # selection parameter 
+S = -0.75 # selection parameter 
 
-PGSs = PGS.sample.uncertainty.liability(N, M, h2, -1, K, n.samples) # Generate genotypes and compute PGS
+PGSs = PGS.uncertainty(N, M, n, h2) # Generate genotypes and compute PGS
 PGS = PGSs$pgs 
 g = as.vector(scale(PGS) * sqrt(h2)) # scaled genetic effects
 
@@ -283,13 +285,7 @@ cat("Prevalence in top", 100*(1 - tPGS), "% PGS quantile:", prevalence.top, "\n"
 ```
 
 #### Ranking simulations
-In this file we do simulations on the relative rankings of individual Polygenic Scores. As the PGS value itself can vary between GWASes and simulations, we look at the relative rankings, which are in some sense a more objective measure of the relative risk of an individual wrt the rest of the population. We study how variable the relative rankings of individual Polygenic Scores are between simulation rounds, and which proportion of individuals are "certain" above or below the top PGS quantile. We sample genotypes and effects sizes, estimate the effect sizes and compute polygenic scores. We order the PGS estimates and collect their rankings. When the effect sizes are sampled and PGS rankings collected several times, we can observe how much the individual rankings change due to the effect estimation uncertainty. We collect
-- PGS rankings for each individual
-- Proportion of PGS rankings in the top PGS quantile for each individual (can be interpreted as the probability of being in the top PGS quantile)
-- Correlations of two rankings of the same individual 
-
-Looking at the proportion of rankings in the top PGS quantile for each individual, the maximum proportion appropaches 1.0 as heritability and GWAS sample size increases. For sample size > 50 000, we can reliably classify the top PGS individuals even with very low heritability. For small sample size and small heritability, even the individuals with highest PGS estimates have significant uncertainty in them, and are not in the top PGS quantile with high probability. We also observe that the proportion of individual PGSs over threshold t approaches either 1 or 0 with increasing sample size and heritability.
-
+In this section we do simulations on the relative rankings of individual Polygenic Scores. As the PGS value itself can vary between GWASes and simulations, we look at the relative rankings, which are in some sense a more objective measure of the relative risk of an individual wrt the rest of the population. We study how variable the relative rankings of individual Polygenic Scores are between simulation rounds, and which proportion of individuals are "certain" above or below the top PGS quantile. We sample genotypes and effects sizes, estimate the effect sizes and compute polygenic scores. We order the PGS estimates and collect their rankings. 
 
 ```{r}
 # ----------------------------------------------------------------------------------------------------
@@ -308,7 +304,7 @@ PGS.sample.rankings <- function(N, M, n, h2, n.samples = 1000, S = -0.75, t = 0.
   ps = runif(M, 0, 1) #  allele 1 frequencies for M SNPs
   var = h2/((2*ps*(1-ps))^S*M) # variance proportional to negative selection coefficient, scaled to match heritability h2 and M SNPs
   sigma.est = 1/N *(1 - var) # effects of SNPs can be estimated with variance proportional to their allele frequency (rare alleles have larger effect sizes, and larger effect sizes can be estimated with smaller uncertainty)
-  betas = rnorm(M, mean = 0, sd = sqrt(var)) # draw betas with variance var.neg
+  betas = rnorm(M, mean = 0, sd = sqrt(var)) # draw betas with variance var
   
   X <- matrix(rbinom(n * M, size = 2, prob = rep(ps, each = n)), nrow = n, ncol = M) # generate genotypes for n individuals assuming allele frequencies follow HWE (n x M)
   
@@ -337,17 +333,16 @@ PGS.sample.rankings <- function(N, M, n, h2, n.samples = 1000, S = -0.75, t = 0.
   for (i in 1:n.samples) {
     ind = 1:n # indices of PGS point estimates
     rankings[, i] = as.integer(rank(pgs.est[, i], ties.method = "first")) # order indices from smallest PGS to largest
-      #order(pgs.est[,i], decreasing = FALSE) 
      
   }
   t.ind = ceiling(t*n) # cutoff index
   rank.prop = apply(rankings, 1, function(x){mean(x > t.ind)
-    #return(mean(above))
   })
   
   return(list(
-    geno = X, # a (n x M) matrix of genotypes of n individuals on M SNPs
+    geno = X, # a (n x M) matrix of scaled genotypes of n individuals on M SNPs
     beta = betas, # a vector of the true effects of M SNPs
+    beta.samples = beta.samples, # a (n.samples x M.true) matrix of genetic effect estimates
     p = ps, # a vector of allele frequencies at M SNPs
     pgs = pgs.mean, # a vector of PGS point estimates for n individuals
     pgs.est = pgs.est, # a (n x n.samples) matrix of PGS samples
@@ -357,14 +352,37 @@ PGS.sample.rankings <- function(N, M, n, h2, n.samples = 1000, S = -0.75, t = 0.
 }
 ```
 
-For each individual we also compute the mean and median rankings, as well as the range of the rankings, which describes well how variable the individual rankings are. We see that the mean range of the rankings decreases with increasing heritability and GWAS sample size N. However, even with large sample size and heritability, there is large variation in the range of the PGS rankings between individuals, which seems to indicate that some individuals can be more reliably classified as a high- or low-risk individuals than others. 
+```{r}
+# ----------------------------------------------------------------------------------------------------
+# A function for calculating the rank correlations of two random PGS samples for each individual, 
+# given a matrix of sample PGS rankings
+# ----------------------------------------------------------------------------------------------------
+compute.rank.correlations <- function(pgs.ranks, n.pairs = 1000, seed = 42) {
+  set.seed(seed)
+  n.samples = ncol(pgs.ranks) # of samples (ranks) for each individual
+  
+  all.pairs = combn(n.samples, 2) # all unique combinations of indices of samples (2 x jotain) matrix
+  nof.pairs = ncol(all.pairs) # of unique pairs
+  sample.ind = sample(nof.pairs, min(n.pairs, length(all.pairs))) # samples the n.pairs pairs from the possible pairs nof.pairs
+  
+  sampled.pairs = as.matrix(all.pairs[,sample.ind, drop = FALSE]) # n.pairs based on sample.ind (2 x n.pairs) matrix
+  
+  corrs = apply(sampled.pairs, 2, function(pair){cor(pgs.ranks[, pair[1]], pgs.ranks[, pair[2]], method = "spearman")}) # compute Spearman correlations for each pairs
+  return(corrs)
+}
+```
+
+When the effect sizes are sampled and PGS rankings collected several times, we can observe how much the individual rankings change due to the effect estimation uncertainty. We collect
+- PGS rankings for each individual
+- Proportion of PGS rankings in the top PGS quantile for each individual (can be interpreted as the probability of being in the top PGS quantile)
+- Correlations of two rankings of the same individual 
 
 Collect PGS rankings, correlations and proportions for N = 500 000 and h2 = 0.5
 ```{r}
 M = 1000 # of SNPs
 h2 = 0.5 # heritability
 N = 500000 # of individuals in GWAS training data
-n.samples = 10000 #
+n.samples = 10000 # 
 t = 0.9 # 
 n = 10000 # of individuals whose PGSs are computed
 n.stats = 5 # of statistics to be collected for each individual
@@ -374,7 +392,7 @@ ranking.stats = matrix(nrow = n, ncol = n.stats )
 rank.correlations = matrix(nrow = n, ncol = 1) 
 proportions = matrix(nrow = n, ncol = 1) # proportion of PGS estimates over t for each individual, for each N and h2
 
-pgs.sample.rankings = PGS.sample.rankings(N, M, n, h2, n.samples, S = -1, t)
+pgs.sample.rankings = PGS.sample.rankings(N, M, n, h2, n.samples, S = -0.75, t)
 
 # collect stats
 rankings = pgs.sample.rankings$pgs.rankings # output is a (n x n.samples) matrix of rankings of n.samples PGS estimates for n individuals
@@ -400,9 +418,10 @@ head(ranking.stats)
 range.means = mean(ranking.stats[, 5])
 
 ```
+When varying sample size N and heritability, the mean range of rankings decreases with increasing sample size and heritability. 
 ```{r}
 # consider only N = 500000 and h2 = 0.5
-rankings.Nlarge = ranking.stats[,c(3, 4, 5)]
+rankings.Nlarge = ranking.stats[,c(1, 3, 4)]
 
 # order rows by mean from smallest to largest
 ordered.rankings = rankings.Nlarge[order(rankings.Nlarge[, 1]), ]
@@ -439,28 +458,30 @@ ranking.table = cbind(mean_of_means, ranges, min_of_mins, max_of_maxs)
 colnames(ranking.table) = c("Mean rankings", "Range", "Min ranking", "Max ranking")
 ranking.table
 ```
-Finally, we visualized the individual PGS estimates as well as their rankings. For individuals that have rankings both above- and below-threshold we notice that some below-threshold PGS values are larger than some above-threshold PGS values, and vice versa. This depends mostly on the target sample size n, so that with smaller n the overlap is larger. This demonstrates that the PGS values themselves are only to be used in ranking individuals with effect estimates from the same GWAS, unless the target sample is large or the PGS values are standardized.
+In a larger simulation, looking at the proportion of rankings in the top PGS quantile for each individual, the maximum proportion appropaches 1.0 as heritability and GWAS sample size increases. For sample size > 50 000, we can reliably classify the top PGS individuals even with very low heritability. For small sample size and small heritability, even the individuals with highest PGS estimates have significant uncertainty in them, and are not in the top PGS quantile with high probability. We also observe that the proportion of individual PGSs over threshold t approaches either 1 or 0 with increasing sample size and heritability.
+
+For each individual we also compute the mean and median rankings, as well as the range of the rankings, which describes well how variable the individual rankings are. We see that the mean range of the rankings decreases with increasing heritability and GWAS sample size N. However, even with large sample size and heritability, there is large variation in the range of the PGS rankings between individuals, which seems to indicate that some individuals can be more reliably classified as a high- or low-risk individuals than others. 
+
+
+Finally, we visualized the PGS estimates and the corresponding rankings of a randomly picked individual. For individuals that have rankings both above- and below-threshold we notice that some below-threshold PGS values are larger than some above-threshold PGS values, and vice versa. This depends mostly on the target sample size n, so that with smaller n the overlap is larger. This demonstrates that the PGS values themselves are only to be used in ranking individuals with effect estimates from the same GWAS, unless the target sample is large or the PGS values are standardized.
 ```{r}
-# Load required libraries
 library(ggplot2)
 library(patchwork)
 
-# Parameters
-M = 1000
-h2 = 0.5
-N = 50000
-n.samples = 100
-t = 0.9
-n = 10000
+M = 1000 # of SNPs
+h2 = 0.5 # heritability
+N = 50000 # GWAS sample size
+n.samples = 100 # of samples calculated for each individual
+t = 0.9 # 
+n = 10000 # target sample size
 
-# Simulate data
-v.rankings = PGS.sample.rankings(N, M, n, h2, n.samples, S = -1, t)
+v.rankings = PGS.sample.rankings(N, M, n, h2, n.samples, S = -0.75, t) # simulate data
 pgs.rankings = v.rankings$pgs.rankings  # a (n x n.samples) matrix of PGS samples (every row corresponds to an individual)
 pgs.est = v.rankings$pgs.est  # a (n x n.samples) matrix of rankings of n.samples PGS estimates for n individuals (every row corresponds to an individual)
 
-i = 30 # Individual index
+i = 30 # individual index
 
-## Plot rankings
+# plot rankings
 ind.rankings = pgs.rankings[i, ] # take all sample rankings of the ith individual
 q.vals1 = rep(t * n, times = n.samples) # a vector of quantile values
 col1 = ifelse(ind.rankings > q.vals1, "above t", "below t") # label rankings based on if they are above or below the quantile
@@ -486,7 +507,7 @@ plot1 = ggplot(df1, aes(x = x, y = y, color = col)) +
   ) +
   coord_cartesian(ylim = c(-0.5, 0.5)) 
 
-## Plot PGS estimates
+# plot PGS estimates
 ind.est = pgs.est[i, ]  # take all sample PGS estimates of the ith individual
 q.est = apply(pgs.est, 2, quantile, probs = t) # calculate values at tth quantile at each columns
 col2 = ifelse(ind.est > q.est, "above t", "below t") # label PGSs based on if they are above or below the quantile
@@ -512,7 +533,7 @@ plot2 = ggplot(df2, aes(x = x, y = y, color = col)) +
   annotate("text", x = Inf, y = 0.4, label = paste0(round(pct.above, 1), "% above t"), 
            hjust = 1.1, size = 4, color = "black")
 
-combined_plot = plot1 / plot2
+combined_plot = plot1 / plot2 # compine plots one below other
 combined_plot
 ```
 
@@ -533,18 +554,137 @@ round(summary.stats, 3)
 
 ```
 
-!!!! YKSILÖIDEN RANKING-JAKAUMAT TÄHÄN !!!!
-- sample ranking funktio, vai voiko yhdistää aiempaan funktioon, tai ainakin käyttää sen outputtia ja tehdä lyhemmän funktion ?
+#### Visualization of individual's PGS rankings and corresponding disease risks.
+Simulate data and classify each individual into above-threshold, below-threshold, uncertain-above-threshold or uncertain-below-threshold.
+```{r}
+library(ggplot2)
+library(patchwork)
+
+N = 500000 # GWAS sample size
+M = 1000 # of SNPs
+n = 10000 # target sample size
+h2 = 0.5 # heritability
+
+pgs = PGS.sample.rankings(N, M, n, h2) # simulate data
+pgs.r = pgs$pgs.est # a (n x n.samples) matrix of n.samples PGS rankings for N individuals
+
+pgs.ranks.scaled = (pgs.ranks) / n # scale rankings to [0,1]
+threshold.scaled = 0.9
+
+# function to compute mean and CI for an individual
+get_individual_stats <- function(individual) {
+  ind.pgs.ranks = pgs.ranks.scaled[individual, ] # individuals rankings
+  mean.ranking = mean(ind.pgs.ranks) # mean ranking
+  CI.low = quantile(ind.pgs.ranks, probs = 0.025) 
+  CI.up = quantile(ind.pgs.ranks, probs = 0.975)
+  list(mean = mean.ranking, CI.low = CI.low, CI.up = CI.up)
+}
+
+# classify each individual
+categories = rep(NA, n)
+for (i in 1:n) {
+  stats = get_individual_stats(i)
+  if (stats$CI.up < threshold.scaled) {
+    categories[i] <- "below"
+  } else if (stats$CI.low > threshold.scaled) {
+    categories[i] <- "above"
+  } else if (stats$mean < threshold.scaled) {
+    categories[i] <- "touch_below"
+  } else {
+    categories[i] <- "touch_above"
+  }
+}
+
+# get indices per category
+below_inds <- which(categories == "below")
+above_inds <- which(categories == "above")
+touch_below_inds <- which(categories == "touch_below")
+touch_above_inds <- which(categories == "touch_above")
+
+# print first indices
+cat("Below threshold:", head(below_inds), "\n")
+cat("Above threshold:", head(above_inds), "\n")
+cat("Overlaps threshold, mean below:", head(touch_below_inds), "\n")
+cat("Overlaps threshold, mean above:", head(touch_above_inds), "\n")
+
+```
+
+Visualize the ranking distribution of a selected individual, with confidence intervals and classification threshold shown, as well as the corresponding desease risks as a boxplot.
+```{r}
+library(ggplot2)
+
+K = 0.1 # disease prevalence
+individual = 59
+
+# Compute disease risks
+t <- qnorm(1 - K) # risk threshold corresponding to prevalence K
+pgs.ind <- pgs.r[individual, ]  # individual's PGS samples
+risks <- pnorm(t, pgs.ind, sqrt(1 - h2), lower.tail = FALSE) # disease risk as a tail probability
+
+ind.pgs.ranks = pgs.ranks[individual, ] # PGS rankings of the individual, a (1 x n.samples) vector
+
+# Scale rankings to [0,1] where 0 = best, 1 = worst
+ind.pgs.ranks.scaled <- (ind.pgs.ranks / n) * 100
+
+# Calculate mean and confidence interval on the scaled data
+mean.ranking.scaled <- mean(ind.pgs.ranks.scaled)
+CI.low.scaled <- quantile(ind.pgs.ranks.scaled, probs = 0.025)
+CI.up.scaled <- quantile(ind.pgs.ranks.scaled, probs = 0.975)
+
+# Compute density on scaled rankings
+dens_scaled <- density(ind.pgs.ranks.scaled)
+dens_df <- data.frame(x = dens_scaled$x, y = dens_scaled$y)
+
+# Mark the confidence interval region
+dens_df$in_CI <- with(dens_df, x >= CI.low.scaled & x <= CI.up.scaled)
+
+density_plot <- ggplot(dens_df, aes(x = x, y = y)) +
+  geom_line(color = "black") + # full density curve
+  geom_area(data = subset(dens_df, in_CI), 
+            fill = "skyblue", alpha = 0.6) + # fill only CI region
+  geom_vline(xintercept = 90, color = "red") + # threshold at 90% percentile
+  annotate("text", x = 90, 
+           y = max(dens_df$y)*0.9, # slightly below top of plot
+           label = "Classification threshold", 
+           color = "red", angle = 90, vjust = -0.5, hjust = 1.1) +
+ geom_segment(aes(x = mean.ranking.scaled, xend = mean.ranking.scaled, 
+                 y = 0, yend = max(y)),
+             color = "blue", linetype = "dashed") +
+annotate("text", x = mean.ranking.scaled, y = max(dens_df$y)*0.8, 
+         label = sprintf("Mean percentile: %2.fth", mean.ranking.scaled),
+         color = "blue", angle = 90, vjust = -0.5, hjust = 1.1) +
+  ggtitle("PGS ranking distribution with highlighted 95 % CI") +
+  xlab("PGS Percentile") +
+  ylab("Density") +
+  theme_minimal()
+
+# Boxplot of disease risks
+df_risks <- data.frame(risk = risks * 100)  # convert to %
+boxplot_risks <- ggplot(df_risks, aes(x = factor(1), y = risk)) +
+  geom_boxplot(fill = "lightblue", width = 0.3) +
+  labs(title = "Disease Risk",
+       x = "", y = "Predicted Risk (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank())
+
+# Combine plots side by side
+combined_plot <- density_plot + boxplot_risks + plot_layout(ncol = 2, widths = c(3, 1))
+
+print(combined_plot)
+
+
+```
+
 
 #### Population risk estimation
 
-We want to model the true polygenic risk in population. To do this we first generate the phenotypes and true genetic effects (betas). Using the true betas, we
-compute the polygenic score for a large number of individuals, yielding us the true genetic values of said individuals. We use large enough N to be able to precisely estimate the genetic values at the quantiles of the PGS distribution. 
+We want to model the true polygenic risk in population. To do this we first generate the phenotypes and true genetic effects (betas). Using the true betas, we compute the polygenic score for a large number of individuals, yielding us the true genetic values of said individuals. We use large enough N to be able to precisely estimate the genetic values at the percentiles of the PGS distribution. 
 
-We test how large N would be needed, so that there is only little variation in the GV percentiles between simulations. We notice that with larger sample size the standard deviation in the sample percentiles remains smaller. An exception is the 0th and the 100th quantile, which are in practice the minimum and maximum value in the PGS data. With 400 000 individuals the PGS percentiles remain relatively stable between simulation.
+We test how large N would be needed, so that there is only little variation in the GV percentiles between simulations. We notice that with larger sample size the standard deviation in the sample percentiles remains smaller. An exception is the 0th and the 100th quantile, which are in practice the minimum and maximum value in the PGS data. With 400 000 individuals the PGS percentiles remain relatively stable between simulations.
 
 After this we estimate the genetic effects as if we would observe the effect estimates from a GWAS. Now we consider another sample of individuals (of size n), and estimate their polygenic scores using the estimated betas. We study the uncertainty in the PGS estimates in two ways:
-1) The uncertainty caused by the limited size n of the sample of individuals whose PGS is computed. If n is too small, small changes in the PGS value can cause major shifts in the ranking of an individual. The sample size n should represent the size of a realistic sample of individuals whose PGS were to be estimated in a real-life setting. 
+1) The uncertainty caused by the limited size n of the sample of individuals whose PGS is computed. If n is too small, small changes in the PGS value can cause major shifts in the ranking of an individual. The sample size n should represent the size of a realistic sample of individuals whose PGS were to be estimated in a real-life setting or study. 
 
 To study the uncertainty caused by the limited sample size used to calculate the PGS ranks, we simulate PGS values and compute the values at percentiles for different n. We expect that with larger n, the PGS percentiles would estimate the GV percentiles better than with smaller n. We calculate the absolute difference between the simulated and the "true" percentiles, and observe that with n = 10 000 the absolute difference to the true percentiles remains small and varies less than with smaller n. 
   
@@ -553,46 +693,27 @@ To study the uncertainty caused by the limited sample size used to calculate the
 For both of these factors we look at how the PGS values at quantiles are affected by the uncertainty. Is is crucial to consider how the PGS values at the top PGS quantile vary, as it may directly affect clinical decisions. To do this we simulate PGS estimates for different n, and look at which proportion of the top-PGS estimates are truly in the top-GV quantile. We should further study if the PGS estimates over- or underestimate the risk of individuals.
 
 #### Uncertainty propagated to risk estimates
-Miten epävarmuus PGS estimoinnissa välittyy sairastumisriskin arvioinnin epävarmuudeksi. 
-- Simuloin pgs otokset ja laskin riskit eri prevalensseille (GWAS N = 500 000, PGS n = 10 000, h² = 0.5, K = 0.001, 0.01, 0.1). Jokaiselle yksilölle laskin 1000 PGS-estimaattia ja vertasin näistä laskettuja sairastumisriskejä todelliseen, oikeilla betoilla laskettuun PGS:äön perustuvaan sairastumisriskiin.
-Katsoin riskejä tarkemmin kahdelle eri yksilöjoukolle:
-- 10 yksilöä, joilla PGS-estimaattien hajonta on suurin, ja
-- 10 yksilöä, joilla PGS:n avulla laskettujen sairastumisriskien hajonta on suurin.
-Piirsin boxplotit, joissa näkyy yksilöiden sairastumisriskin vaihtelu PGS-estimaattien välillä. Punaisella pisteellä on merkitty kunkin yksilön todellinen sairastumisriski. 
+How does the uncertainty in PGS estimation propagate into uncertainty in the disease risk estimation?
+To study this, I simulated the PGS samples for a set of individuals and computed disease risks for different disease prevalences (GWAS N = 500 000, PGS n = 10 000, h² = 0.5, K = 0.001, 0.01, 0.1). For each individual, 1000 PGS estimates were calculated, and the corresponding disease risks were compared to the true disease risk (computed using the true betas). 
 
-Ensimmäisten kuvaajien yksilöillä, joilla PGS-estimaattien hajonta on suurinta, sairastumisriskin hajonta vaihtelee. Vaikka PGS hajonta olisi suurta, jos he sijoittuvat geneettisen komponentin osalta kauas liabiliteettirajasta, vaihtelu sairastumisriskissä ei ole yhtä suurta.
+The disease risks were studied further for two sets of individuals:
+- 10 individuals with most variation in the PGS estimates
+- 10 individuals with most variation in the disease risks computed using PGS estimates
 
-Toisessa kuvaajassa yksilöillä, joiden sairastumisriski vaihtelee eniten, on kaikilla korkea todellinen sairastumisriski. Nämä yksilöt sijoittuvat geneettisen komponentin osalta jo lähelle liabiliteettirajaa, jolloin pienet muutokset PGS:ssö johtavat suuriin muutoksiin sairastumisriskissä.
-
-Molemmissa ryhmissä yksilöiden sairastumisriskissä on suurta vaihtelua, esim. esimmäisessä kuvassa yksilön 1 riski vaihtelee välillä 12.1 % - 50,4 %., ja toisessa kuvassa yksilön 1 riski on välillä 24,8 % - 66,8 %.
-Piirsin myös sairastumisriskin PGS:n funktiona, ja merkitsin siihen nämä kaksi yksilöjoukkoa. Suurimman PGS-hajonnan yksilöt sijoittuvat hajalleen koko käyrälle, mutta suurimman riskihajonnan yksilöt keskittyvät käyrän jyrkimpään kohtaan.
-
-Kuvat näyttävät, millaista vaihtelua yksittäisten yksilöiden kohdalla voi esiintyä niin PGS:ssä kuin sairastumisriskissä. Näissä kuvissa yksilöiden riski lasketaan suoraan PGS estimaatista, joten yksilöiden keskinäinen järjestys simulaatioissa ei vaikuta riskiestimaatteihin. 
-
-Boxplotin korkeus kertoo miten epävarmuus PGS estimoinnissa siirtyy epävarmuuteen sairausriskin estimoinnissa.
-
-1) Valittu 10 yksilöä, joiden PGS varianssi on suurin. 
--> Yksilöt joiden PGS estimaatti on epävarma, mutta saattavat sijoittua kaikkialle PGS jakaumalla. 
-
-2) Valittu 10 yksilöä, joiden PGS avulla laskettujen sairastumisriskien varianssi on suurin. 
--> Yksilöt, joiden sairausriski on vaihtelee paljon eri PGS estimaattien välillä. Näille yksilöille pienet muutokset PGS arvossa aiheuttavat suuria muutoksia sairausriskissä. (sijoittuvat jyrkkään kohtaa liabiliteetti-käyrällä)
--> Kertoo epävarmuudesta sairastumisriskissä. 
-
- Kuvaajissa laskettu sairastumisriski yksilöille eri PGS estimaateilla, sekä "todellinen sairastumsiriski". Laskut on toistettu eri prevalensseille.
+From the boxplots of disease risk we see the variation in the disease risk for said individuals. The red dot indicates the true disease risk of the individual. 
 
 ```{r}
-
 library(ggplot2)
 library(reshape2)
 
-N = 500000
-n = 10000
-M = 1000
-h2 = 0.5
-n.samples = 1000
+N = 500000 # GWAS sample size
+n = 10000 # target sample size
+M = 1000 # of SNPs
+h2 = 0.5 # heritability
+n.samples = 1000 # of samples for each individual
 Ks = c(0.001, 0.01, 0.1) # disease prevalences
 
-pgs = PGS.uncertainty(N, n, M, h2)
+pgs = PGS.uncertainty(N, n, M, h2) # simulate data
 
 pgs.samples = pgs$pgs.samples # a (n.samples x n) matrix of n.samples PGS estimates for n individuals
 pgs.gv = pgs$gv # true GVs of n individuals
@@ -606,15 +727,14 @@ for (K in Ks){
   
   # TOP TEN INDICES BY PGS SD
   sds = apply(pgs.samples, 2, sd)
-  risk.filter = true.risks > 0.01 
+  risk.filter = true.risks > 0.001 
   sd.ordered = order(sds, decreasing = TRUE)
   sd.indices = sd.ordered[risk.filter[sd.ordered]][1:10] # interesting indices by pgs sd
-  #print(sd.indices)
   
   # TOP TEN INDICES BY RISK SD
   risk.sd = apply(sample.risks, 2, sd) 
   risk.indices = order(risk.sd, decreasing = TRUE)[1:10] # interesting individuals by risk sd
-  #print(risk.indices)
+  
   # Plot risk of disease for individuals with most variation in PGS
   plot.risks = sample.risks[,sd.indices]
   true.risks.i = true.risks[sd.indices]
@@ -689,6 +809,13 @@ for (K in Ks){
   }
 
 ```
+The individuals in the first plot, with largest variation in the PGS estimates, the variation in the disease risk is very variable. This indicates that high variation in the PGS estimates does not necessarily cause large variation in the disease risk. For example, if the individual ranks far away from the liability threshold by their genetic component, the variation in PGS estimates does not cause variation in the disease risk estimates.
+
+In the second plot, the individuals whose disease risk varies higly, all have high risk of disease. These individuals rank close to the liability threshold by their genetic component, and thus even small changes in PGS estimates cause large variation in the disease risk. 
+
+Either way, there is large variation in disease risk for the individuals in both sets. 
+
+The third plot presents the diesease risk as a function of PGS, with the two sets of individuals marked in the figure.
 ```{r}
 # Riskifunktio (cumulative normal)
 pgs.range = seq(min(pgs$gv) - 1, max(pgs$gv) + 1, length.out = 1000)
@@ -700,37 +827,34 @@ plot(pgs.range, risk.curve, type = "l", col = "blue",
 
 # Individuals with largest PGS variance
 points(pgs$gv[sd.indices], true.risks[sd.indices], col = "red", pch = 19)
-#text(pgs$pgs.est[sd.indices], true.risks[sd.indices],
-#     labels = sd.indices, pos = 3, col = "red")
 
 #  Individuals with largest variance in disease risk
 points(pgs$gv[risk.indices], true.risks[risk.indices], col = "darkgreen", pch = 17)
-#text(pgs$pgs.est[risk.indices], true.risks[risk.indices],
-#     labels = risk.indices, pos = 1, col = "darkgreen")
 
 legend("bottomright", legend = c("Top PGS variance", "Top disease risk variance"),
        col = c("red", "darkgreen"), pch = c(19,17))
 
 ```
+The individuals with largest variation in PGS estimates lie evenly around the curve, but the individuals with largest variation in disease risk lie on the steepest part of the curve.
+
+The figures illustrate the variability in individual's PGS estimates and disease risks. In these figures the disease risk is computed directly from the PGS estimate, and thus the relative ordering of individuals in the simulation does not affect the risk estimates.
+
+Boxplotin korkeus kertoo miten epävarmuus PGS estimoinnissa siirtyy epävarmuuteen sairausriskin estimoinnissa.
+
+1) Valittu 10 yksilöä, joiden PGS varianssi on suurin. 
+-> Yksilöt joiden PGS estimaatti on epävarma, mutta saattavat sijoittua kaikkialle PGS jakaumalla. 
+
+2) Valittu 10 yksilöä, joiden PGS avulla laskettujen sairastumisriskien varianssi on suurin. 
+-> Yksilöt, joiden sairausriski on vaihtelee paljon eri PGS estimaattien välillä. Näille yksilöille pienet muutokset PGS arvossa aiheuttavat suuria muutoksia sairausriskissä. (sijoittuvat jyrkkään kohtaa liabiliteetti-käyrällä)
+-> Kertoo epävarmuudesta sairastumisriskissä. 
+
+Kuvaajissa laskettu sairastumisriski yksilöille eri PGS estimaateilla, sekä "todellinen sairastumsiriski". Laskut on toistettu eri prevalensseille.
 
 
-
-
-Kun n = 1000 tai 10 000, epävarmuus pienenee kun K kasvaa. Kun yksilöjoukko on pieni (n = 100), niin epävarmuus on suurinta kun K = 0.01 (vs 0.1 tai 0.001). 
-- kun n = 100, prevalenssilla 0.1 sairastuneita yksilöitä on noin 10, prevalenssilla 0.01 sairastuneita on noin 1 ja prevalenssilla 0.001 sairastuneita ei todennäköisesti ole. Siten prevalensseilla 0.1 ja 0.001 simulaatioissa näkyy melko pientä epävarmuutta sairastumisriskissä, mutta prevalenssilla 0.01 sairastuneita on joko 0 tai 1, mikä aiheuttaa korkeamman epävarmuuden riskiin.
-
-Muuten epävarmuus riskissä pienenee kun prevalenssi kasvaa, sillä kun sairastuneita on enemmän, pienet vaihtelut sairastuneiden lukumääärissä eivät aiheuta suurta epävarmuutta sairastumisriskiin.
-
-Tapausten lukumäärän kasvaessa epävramuus sairastumisriskissä pienenee. Kun tapausten määrä kasvaa, efektiivinen otoskoko kasvaa ja epävarmuus GWAS betoissa pienenee. Tällöin epävarmuus yksilöiden PGS estimaateissa pienenee ja myös epävarmuus sairastumsiriskissä pienenee. 
-
-Heritabiliteetin h2 kasvaessa riskikäyrä jyrkkenee, kun ympäristön vaikutus sairastumisriksiin pienenee. Simulaatioissa heritabiliteetin ja sairastumisriskin epävarmuuden välillä ei näy selkeää yhteyttä. 
-
-Yksilöjoukon koko n, jossa PGS lasketaan ja yksilöt järjestetään, vaikuttaa sairastumisriskin epävarmuuteen merkittävästi; epävarmuus on suurempaa kun n on pieni. Erityisesti kun n = 100, satunnaisuus vaikuttaa suuresti. 
 ```{r}
 # ---------------------------------------------------------------------------------------------------------------------
 # a function for computing disease risks (min, max and mean risk, range and variance) for pgs ranking positions over a sample of individuals 
 # ---------------------------------------------------------------------------------------------------------------------
-# ???? VOISIKO YHDISTÄÄ AIEMPAAN FUNKTIOON, TAI KÄYTTÄÄ SEN OUTPUTTIA JA TEHDÄ TÄSTÄ LYHEMMÄN ????
 PGS.risk.by.ranking <- function(N, M, n, h2, K, n.samples, S = -1){
   # N: # of individuals in GWAS used to estimate effect sizes
   # M: # of SNPs
@@ -740,44 +864,21 @@ PGS.risk.by.ranking <- function(N, M, n, h2, K, n.samples, S = -1){
   # S: relative contributions of common vs rare variants
   # q: PGS quantile to be considered
   
-  t = qnorm(1 - K)
-  
-  ps = runif(M, 0, 1) #  allele 1 frequencies for M SNPs
-  var = h2/((2*ps*(1-ps))^S*M) # variance proportional to negative selection coefficient, scaled to match heritability h2 and M SNPs
-  betas = rnorm(M, mean = 0, sd = sqrt(var)) # draw betas with variance var.neg
-  
-  X <- matrix(rbinom(n * M, size = 2, prob = rep(ps, each = n)), nrow = n, ncol = M) # generate genotypes for n individuals assuming allele frequencies follow HWE (n x M)
-  
-  # filter out SNPs with no variation
-  idx.filter = apply(X, 2, sd) > 0
-  X = X[, idx.filter]
-  X = scale(X, center = TRUE, scale = TRUE)
-  betas = betas[idx.filter] 
-  
-  M.true = length(betas)
-  
-  sigma.est = 1/N *(1 - var) # effects of SNPs can be estimated with variance proportional to their allele frequency (rare alleles have larger effect sizes, and larger effect sizes can be estimated with smaller uncertainty)
-  sigma.est = sigma.est[idx.filter]
-  
-  # sample effect estimates
-  beta.samples = matrix(nrow = n.samples, ncol = M.true) # collect n.samples of beta estimates (n.samples x M (or less if filtered SNPs))
-  for (i in 1:n.samples){ # sample beta estimates and collect into beta.samples matrix
-    beta.samples[i,] = rnorm(M.true, betas, sqrt(sigma.est)) # add noise proportional to sample size, formula from paper 3
-  }
-  
   # compute PGS estimates
+  PGS = PGS.sample.rankings(N, M, n, h2) # simulate data
+  X = PGS$geno # get genotypes
+  beta.samples = PGS$beta.samples # estimated genetic effects
+  
   pgs.est = X %*% t(beta.samples) # PGS samples (n x n.samples)
   
-  # scale pgs estimates
-  pgs.sc = scale(pgs.est)
+  pgs.sc = scale(pgs.est) # scale pgs estimates
   
   # order PGS estimates within each sample (order each column of pgs.est)
   pgs.ord = apply(pgs.sc, 2, sort) # now each column (sample) is sorted into increasing order
   
   # compute risk for each pgs estimate
   risks = pnorm(t, pgs.ord, sqrt(1-h2), lower.tail = FALSE) # a (n x n.samples) matrix of risks
-  print(N)
-  print(dim(risks))
+  
   # compute minimum, maximum and mean risks for each n (point in the PGS distribution)
   min.risks = apply(risks, 1, min)
   max.risks = apply(risks, 1, max)
@@ -785,14 +886,11 @@ PGS.risk.by.ranking <- function(N, M, n, h2, K, n.samples, S = -1){
    
   pgs.mean = colMeans(pgs.est) # PGS point estimates for each individual
   
-  # compute rankings of PGS estimates
-  rankings = matrix(nrow = n, ncol = n.samples) # a (n x n.samples) matrix of rankings
 
-  
   return(list(
     pgs = pgs.mean, # a vector of PGS point estimates for n individuals
     pgs.est = pgs.est, # a (n x n.samples) matrix of PGS samples
-    risks = risks,
+    risks = risks, # a (n x n.samples) matrix of disease risks for n individuals
     min.risks = min.risks, 
     max.risks = max.risks, 
     mean.risks = mean.risks
@@ -801,106 +899,38 @@ PGS.risk.by.ranking <- function(N, M, n, h2, K, n.samples, S = -1){
 
 ```
 
-```{r}
-N = 100000
-M = 1000
-n = 1000 # vaihtele
-h2 = 0.2 # vaihtele
-K = 0.01 # vaihtele
-n.samples = 1000 # vai 100
-
-PGS.risk = PGS.risk.by.ranking(N, M, n, h2, K, n.samples)
-
-risks = PGS.risk$risks # (n x n.samples) matrix of risks 
-max(PGS.risk$max.risks[1:9900] - PGS.risk$min.risks[1:9900])
-
-t = qnorm(1 - K)
-pgs_thresh_percentile <- 1 - pnorm(t / sqrt(h2))
-pgs_thresh_rank <- pgs_thresh_percentile # already scaled
-
-cat(sprintf("PGS threshold at %.2f%% percentile for prevalence K=%.2f\n",
-            pgs_thresh_rank * 100, K * 100))
-
-# plot risks by PGS ranking
-library(ggplot2)
-
-# df for min/max risks
-min_max_df <- data.frame(
-  Rank = (1:n) / n,  # Scale rank to [0,1]
-  Min = PGS.risk$min.risks,
-  Max = PGS.risk$max.risks
-)
-max_allowed_rank <- 0.999
-max_allowed_idx <- floor(n * max_allowed_rank)
-
-uncertainty <- PGS.risk$max.risks - PGS.risk$min.risks
-max_idx <- which.max(uncertainty[1:max_allowed_idx])       # index of max uncertainty
-max_rank <- max_idx / n                 # percentile (scaled rank)
-max_diff <- uncertainty[max_idx]        # max difference (risk range)
-max_min <- PGS.risk$min.risks[max_idx]  # min risk at this percentile
-max_max <- PGS.risk$max.risks[max_idx]  # max risk at this percentile
-
-PGS.sorted <- sort(PGS.risk$PGS)  # sorted PGS scores
-PGS.threshold <- PGS.sorted[max_idx]  # PGS value at max uncertainty
-
-# tulosta tiivistelmä
-cat(sprintf(
-  "Max uncertainty at percentile %.1f%%: %.2f%% – %.2f%% (Δ=%.2f%%)\n",
-  max_rank * 100, max_min * 100, max_max * 100, max_diff * 100
-))
-cat(sprintf("PGS threshold at this percentile: %.4f\n", PGS.threshold))
-
-ggplot(min_max_df, aes(x = Rank)) +
-  geom_ribbon(aes(ymin = Min, ymax = Max), fill = "lightblue", alpha = 0.4) +
-  geom_line(aes(y = Min), color = "red", size = 1) +
-  geom_line(aes(y = Max), color = "blue", size = 1) +
-  geom_vline(xintercept = max_rank, linetype = "dashed", color = "black") + # vertical line
-  annotate("point", x = max_rank, y = PGS.risk$min.risks[max_idx], color = "red", size = 2) +
-  annotate("point", x = max_rank, y = PGS.risk$max.risks[max_idx], color = "blue", size = 2) +
-  
-  geom_vline(xintercept = pgs_thresh_rank, linetype = "dotted", color = "purple") + # prevalence threshold
-  labs(title = "Min and Max risks across PGS rankings",
-       subtitle = sprintf("Max uncertainty at %.1f%% percentile with risk between %.2f%% and %.2f%%", round(max_rank * 100,1), round(max_min*100,1), round(max_max*100, 1)),
-       x = "Relative PGS rank",
-       y = "Risk") +
-  theme_minimal()
-
-```
 
 ```{r}
 library(ggplot2)
 library(grid)
-
+# ----------------------------------------------------------------------------------------------------
 # a function for plotting min and max risks over pgs percentiles
-
-plot_PGS_uncertainty <- function(N.case = 100000, N.ctrl = 100000, M = 1000, n = 1000, h2 = 0.2, K = 0.01, n.samples = 100) {
+# ----------------------------------------------------------------------------------------------------
+plot.PGS.uncertainty <- function(N.case = 100000, N.ctrl = 100000, M = 1000, n = 1000, h2 = 0.5, K = 0.01, n.samples = 1000) {
   
-  # compute effective sample size
   phi = N.case/(N.ctrl + N.case) # phi: proportion of cases
-  N.eff = (N.case + N.ctrl) * phi * (1-phi)
+  N.eff = (N.case + N.ctrl) * phi * (1-phi) # compute effective sample size
   
-  # Run the risk computation
-  PGS.risk <- PGS.risk.by.ranking(N.eff, M, n, h2, K, n.samples)
+  PGS.risk <- PGS.risk.by.ranking(N.eff, M, n, h2, K, n.samples) # Run the risk computation
   
-  # Prevalence liability threshold
-  t <- qnorm(1 - K)
-  pgs_thresh_percentile <- pnorm(t / sqrt(h2))
-  pgs_thresh_rank <- pgs_thresh_percentile
+  t <- qnorm(1 - K) # liability threshold for this prevalence  
+  pgs_thresh_percentile <- pnorm(t / sqrt(h2)) # PGS percentile corresponding to liablity threshold
+  pgs_thresh_rank <- pgs_thresh_percentile 
   
-  min_max_df <- data.frame(
+  min_max_df <- data.frame( # collect min and max risks for each ranking
     Rank = (1:n) / n,
     Min = PGS.risk$min.risks,
     Max = PGS.risk$max.risks
   )
   
-  max_allowed_rank <- 0.999
+  max_allowed_rank <- 0.999 
   max_allowed_idx <- floor(n * max_allowed_rank)
   
-  uncertainty <- PGS.risk$max.risks - PGS.risk$min.risks
-  max_idx <- which.max(uncertainty[1:max_allowed_idx])
-  max_rank <- max_idx / n
-  max_diff <- uncertainty[max_idx]
-  max_min <- PGS.risk$min.risks[max_idx]
+  uncertainty <- PGS.risk$max.risks - PGS.risk$min.risks # range of rankings (uncertainty)
+  max_idx <- which.max(uncertainty[1:max_allowed_idx]) # index of individual just below threshold
+  max_rank <- max_idx / n # ranking of individual just below threshold
+  max_diff <- uncertainty[max_idx] # range of rankings for individual just below threshold
+  max_min <- PGS.risk$min.risks[max_idx] 
   max_max <- PGS.risk$max.risks[max_idx]
   
   PGS.sorted <- sort(PGS.risk$PGS)
@@ -931,7 +961,6 @@ plot_PGS_uncertainty <- function(N.case = 100000, N.ctrl = 100000, M = 1000, n =
   )
   
   # Laske ymin ja ymax, vähän yli riskien ylärajan, tekstiboksin rajat
-  
   ymax_pos <- max(min_max_df$Max) * 1.05
   ymin_pos <- ymax_pos - 0.37
   
@@ -939,6 +968,7 @@ plot_PGS_uncertainty <- function(N.case = 100000, N.ctrl = 100000, M = 1000, n =
     geom_ribbon(aes(ymin = Min, ymax = Max), fill = "lightblue", alpha = 0.4) +
     geom_line(aes(y = Min), color = "red", size = 1) +
     geom_line(aes(y = Max), color = "blue", size = 1) +
+    geom_vline(xintercept = max_rank, linetype = "dashed", color = "black") + # vertical line
     annotate("point", x = max_rank, y = max_min, color = "red", size = 3) +
     annotate("point", x = max_rank, y = max_max, color = "blue", size = 3) +
     labs(
@@ -966,17 +996,29 @@ plot_PGS_uncertainty <- function(N.case = 100000, N.ctrl = 100000, M = 1000, n =
 
 ```
 
+With the target sample size large (n = 1000 or 10 000), uncertainty in disease risk decreases with increasing prevalence K. With a small target sample (n = 100), the uncertainty is largest when k = 0.01. This is explained by the small sample size: when n = 100, with prevalence 0.1 there are ~ 10 diseased individuals, and small changes in the number of diseased individuals do not cause large changes in the disease risk. With prevalence 0.001 there are likely no diseased individuals, and thus the disease risk does not vary that much. With prevalence 0.01, however, there are likely 0 or 1 diseased individuals, wich causes the risk of disease to vary greatly. 
+
+Otherwise, uncertainty in disease risk decreases with inncreasing prevalence, since when there are more diseased individuals, small changes in the number of diseased individuals do not cause large uncertainty in the disease risk.
+
+The uncertainty in the disease risk decreases with increasing number of cases, as when the effective sample size increases, the uncertainty in the GWAS effect sizes decreases. This way the uncertainty in individuals PGS estimates decreases, decreasing the uncertainty in disease risk.
+
+As the heritability increases, the disease risk curve gets steeper with environment having a smaller inpact in the disease risk. In simulations there is no clear connection between heritability and disease risk. 
+
+The target sample size n has a significant impact on the uncertainty in the disease risk. The uncertainty is the greatest with small n, but with n = 1000 and 10 000 the uncertainty decreases significantly.
+
+
 ### Example cases
 ```{r}
 #CHD PGS000019 : h2 = 0.5, K = 0.05, N.case = 60 000, N.ctrl = 120 000, M = 192, n = 725, samples
-h2 = 0.5 
-K = 0.05 
-N.case = 60000 
-N.ctrl = 120000 
-M = 192
-n = 725
-samples = 1000
-plot_PGS_uncertainty(N.case, N.ctrl, M, n, h2, K, samples)
+h2 = 0.5 # heritability
+K = 0.05 # CHD prevalence
+N.case = 60000 # of cases in GWAS
+N.ctrl = 120000 # of controls in GWAS
+M = 192 # of SNPs in PGS
+n = 725 # target sample size
+samples = 1000 # of samples for each individual
+
+plot.PGS.uncertainty(N.case, N.ctrl, M, n, h2, K, samples)
 
 ```
 
@@ -1008,10 +1050,21 @@ Essential code snippets and additional figures.
 
 Lähetä matille:
 ranking distributionit mutta sairastumisriskillä / riskiplotit todellisten tutkimusten parametreillä
-pitääkö betat skaalata?
+pitääkö betat skaalata? ei
 
 
 [1] Theoretical and empirical quantification of the accuracy of polygenic scores in ancestry divergent populations
 [2] Large uncertainty in individual polygenic risk score estimation impacts PRS-based risk stratification
 [3] Heritable polygenic editing: the next frontier in genomic medicine?
 
+
+idea
+
+voiko soveltaa käytäntöön ja onko lähestyminen sama kuin Ding et al paperissa?
+
+Ding et al: 
+- jokaiselle yksilölle lasketaan GV posteriorijakauma, joka avulla lasketaan posteriori sd sekä credible intervallit PRSlle. 
+- Paperissa johdetaan myös analyyttinen laskukaava yksilön PRS sd:lle. 
+
+
+# esityksen hahmottelu
