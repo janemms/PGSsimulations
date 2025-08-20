@@ -1,2 +1,2 @@
 # PGSsimulations
-Simulations on the uncertainty in Polygenic Scores (PGS).
+Simulations on the individual-level uncertainty in Polygenic Scores (PGS).
