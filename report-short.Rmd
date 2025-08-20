@@ -1,0 +1,989 @@
+---
+title: "raportti"
+output: html_document
+date: "2025-08-11"
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## **Polygenic Risk Scores: Individual Uncertainty**
+
+Polygenic risk scores (PGSs) can identify individuals at higher genetic risk for disease, but most performance metrics (e.g., R², AUC) describe population averages.
+For real-world use — deciding if *this* person is in the “high-risk” group — what matters is **how uncertain the individual’s score is**.
+
+Our simulations explored how GWAS sample size, heritability, and target sample size affect individual-level uncertainty in PGS values, rankings, and the resulting disease risk predictions.
+```{r}
+# ----------------------------------------------------------------------------------------------------
+# Function for testing individual PGS variability with different sample sizes, heritability, # of SNPs
+# Calculates variance in PGS by sampling effect estimates and calculating PGS for each sample
+# ----------------------------------------------------------------------------------------------------
+
+PGS.sample.uncertainty <- function(N, M, n, h2, S = -1, n.samples = 1000){
+  # N: # of individuals
+  # M: # of SNPs
+  # n: # of individuals whose PGS is to be computed
+  # h2: heritability
+  # S: relative contributions of common vs rare variants
+  # n.samples: # of samples where PGS and its variance are computed from
+  
+  ps = runif(M, 0, 1) #  allele 1 frequencies for M SNPs
+  var = h2/((2*ps*(1-ps))^S*M) # variance proportional to negative selection coefficient, scaled to match heritability h2 and M SNPs
+  betas = rnorm(M, mean = 0, sd = sqrt(var)) # draw true betas with variance var.neg
+  
+  beta.samples = matrix(nrow = n.samples, ncol = M) # collect n.samples of beta estimates
+  
+  sigma.est = 1/N *(1 - var) # effects of SNPs can be estimated with variance proportional to their allele frequency (rare alleles have larger effect sizes, and larger effect sizes can be estimated with smaller uncertainty)
+  
+  for (i in 1:n.samples){
+    beta.samples[i,] = rnorm(M, betas, sqrt(sigma.est)) # add noise proportional to sample size, formula from paper 3
+  }
+  
+  X <- matrix(rbinom(n * M, size = 2, prob = rep(ps, each = n)), nrow = n, ncol = M) # generate genotypes assuming allele frequencies follow HWE
+  
+  # filter out variants with no variation across individuals
+  idx.filter = apply(X, 2, sd) > 0
+  X.filtered = X[, idx.filter]
+  beta.samples = beta.samples[, idx.filter] 
+  sigma.est = sigma.est[idx.filter]
+  
+  X.scaled = scale(X.filtered) # standardize genotypes to have mean 0 and variance 1
+  beta.mean = colMeans(beta.samples) # mean of the sampled beta estimates, acts as the point estimate
+  pgs.samples = matrix(nrow = n.samples, ncol = n) # each column is a sample of PGSs for an individual
+  
+  beta.est = beta.samples[1, ] # single effect estimates for analytical variance calculation
+  
+  pgs.samples = beta.samples %*% t(X.scaled)
+  
+  pgs = colMeans(pgs.samples) # point estimates for PGSs
+  pgs.var = X^2 %*% sigma.est # variance in individual PGS estimates due to noise in the effect size estimates
+  pgs.sample.var = apply(pgs.samples, 2, var) # variances of individual PGS estimates
+  
+  return(list(pgs = pgs,
+              pgs.samples = pgs.samples, # a (n.samples x n) matrix of n.samples PGS estimates for n individuals
+              sample.variance = pgs.sample.var, # variance in individual PGS estimates due to noise in the effect size estimates, from analytical formula
+              variance = pgs.var # variances of individual PGS estimates, estimated from the sample
+              ))
+}
+
+```
+
+```{r}
+# ----------------------------------------------------------------------------------------------------
+# Function for calculating sample PGS estimates and their relative rankings, and proportions
+# of ranking exceeding the PGS stratification quantile t
+# ----------------------------------------------------------------------------------------------------
+PGS.sample.rankings <- function(N, M, n, h2, n.samples = 1000, S = 0.75, t = 0.9){
+  # N: # of individuals in GWAS used to estimate effect sizes
+  # M: # of SNPs
+  # n: # of individuals whose PGS is to be computed
+  # h2: heritability
+  # n.samples: # of PGS estimates to be sampled
+  # S: relative contributions of common vs rare variants
+  # t: PGS quantile to be considered
+  
+  ps = runif(M, 0, 1) #  allele 1 frequencies for M SNPs
+  var = h2/((2*ps*(1-ps))^S*M) # variance proportional to negative selection coefficient, scaled to match heritability h2 and M SNPs
+  sigma.est = 1/N *(1 - var) # effects of SNPs can be estimated with variance proportional to their allele frequency (rare alleles have larger effect sizes, and larger effect sizes can be estimated with smaller uncertainty)
+  sigma.est = pmax(1/N * (1 - var), 0)
+  betas = rnorm(M, mean = 0, sd = sqrt(var)) # draw betas with variance var
+  
+  X <- matrix(rbinom(n * M, size = 2, prob = rep(ps, each = n)), nrow = n, ncol = M) # generate genotypes for n individuals assuming allele frequencies follow HWE (n x M)
+  
+  # filter out SNPs with no variation
+  idx.filter = apply(X, 2, sd) > 0
+  X = X[, idx.filter]
+  X = scale(X, center = TRUE, scale = TRUE)
+  betas = betas[idx.filter] 
+  sigma.est = sigma.est[idx.filter]
+  
+  M.true = length(betas)
+  
+  # sample effect estimates
+  beta.samples = matrix(nrow = n.samples, ncol = M.true) # collect n.samples of beta estimates (n.samples x M (or less if filtered SNPs))
+  for (i in 1:n.samples){ # sample beta estimates and collect into beta.samples matrix
+    beta.samples[i,] = rnorm(M.true, betas, sqrt(sigma.est)) # add noise proportional to sample size, formula from paper 3
+  }
+  
+  # compute PGS estimates
+  pgs.est = X %*% t(beta.samples) # PGS samples (n x n.samples)
+  pgs.mean = rowMeans(pgs.est) # PGS point estimates for each individual
+  
+  # compute rankings of PGS estimates
+  rankings = matrix(nrow = n, ncol = n.samples) # a (n x n.samples) matrix of rankings
+  
+  for (i in 1:n.samples) {
+    ind = 1:n # indices of PGS point estimates
+    rankings[, i] = as.integer(rank(pgs.est[, i], ties.method = "first")) # order indices from smallest PGS to largest
+     
+  }
+  t.ind = ceiling(t*n) # cutoff index
+  rank.prop = apply(rankings, 1, function(x){mean(x > t.ind)
+  })
+  
+  return(list(
+    geno = X, # a (n x M) matrix of scaled genotypes of n individuals on M SNPs
+    beta = betas, # a vector of the true effects of M SNPs
+    beta.samples = beta.samples, # a (n.samples x M.true) matrix of genetic effect estimates
+    p = ps, # a vector of allele frequencies at M SNPs
+    pgs = pgs.mean, # a vector of PGS point estimates for n individuals
+    pgs.est = pgs.est, # a (n x n.samples) matrix of PGS samples
+    pgs.rankings = rankings, # a (n x n.samples) matrix of rankings of n.samples PGS estimates for n individuals
+    prop.over.t = rank.prop # a vector of proportions of PGS values over t:th quantile for each individual
+    )) 
+}
+```
+
+### **Observation 1: GWAS sample size strongly affects individual PGS uncertainty**
+
+The estimation error in genetic effects of SNPs decreases as a function of GWAS sample size, and thus larger GWAS sample sizes reduce variability in an individual’s PGS estimate.
+\* With **N \> 50,000**, even low-heritability traits can have reliably identified top-decile individuals.
+\* Small GWAS (e.g., N = 5,000) lead to large rank fluctuations — even the highest scorers may drop out of the top decile in another dataset.
+\* **Smaller heritability increases uncertainty**, but the sample size effect dominates.
+
+```{r}
+
+Ns = c(10000, 50000, 100000, 200000, 400000) # GWAS sample size
+K = 0.01 # Ks = c(0.01,0.05,0.1,0.2), lifetime prevalence of disease
+n = 10000 # target sample size
+M = 1000 # of SNPs
+h2 = 0.5 # heritability 
+n.samples = 1000
+n.reps = 100 # of GWASs per sample size
+
+res = matrix(NA, nrow = length(Ns), ncol = n.reps)
+res.cond = matrix(NA, nrow = length(Ns), ncol = n.reps)
+for (i in seq_along(Ns)){
+  N = Ns[i]
+  for (r in 1:n.reps){
+  # sample PGSs for each individual
+  pgs.s = PGS.sample.rankings(N, M, n, h2)
+  pgs.samples = pgs.s$pgs.rankings # a (n x n.samples) matrix of rankings of n.samples PGS estimates for n individuals
+  pgs.prop = pgs.s$prop.over.t # a vector of proportions of PGS values over t:th quantile for each individual
+  
+  mid.count = sum( ( pgs.prop > 0.4 & pgs.prop < 0.6) * 1) # of individuals with proportion of liability values over threshold in (0.4, 0.6)
+  mid.prop = mid.count / n.samples
+  res[i, r] = mid.prop
+  
+  ever.top = pgs.prop > 0 # individuals that are sometimes at top decile
+  mid.count.cond = sum(ever.top & pgs.prop > 0.4 & pgs.prop < 0.6)
+  mid.prop.cond = mid.count.cond / sum(ever.top)
+  res.cond[i, r] = mid.prop.cond
+  
+  }
+}
+
+```
+
+Proportion of individuals whose ranking is "uncertain", ie.
+their proportion of rankings over threshold is in (0.4, 0.6), as a function of GWAS sample size.
+With GWAS sample size of 10 000, 20 % of individuals cannot be reliably classified into high - or low-risk individuals.
+Conclusion: In clinical screening, only PGSs from large, well-powered GWAS will produce stable “high-risk” classifications.
+
+```{r}
+library(ggplot2)
+
+# Build a data frame directly from res
+df <- data.frame(
+  N = rep(Ns, each = n.reps),
+  mid.prop = as.vector(t(res))  # flatten by row
+)
+
+# Convert N to a factor so we get 5 separate boxplots
+df$N <- factor(df$N, levels = Ns)
+
+# Plot
+ggplot(df, aes(x = N, y = mid.prop)) +
+  geom_boxplot(fill = "skyblue", alpha = 0.6) +
+  labs(
+    x = "GWAS Sample Size (N)",
+    y = "Proportion of uncertain individuals",
+    title = "Proportion of uncertain individuals vs GWAS sample size"
+  ) +
+  theme_minimal(base_size = 14)
+
+ggsave(filename = paste0("ucertain-ind-vs-N", ".png"), 
+       plot = last_plot(), 
+       width = 7, height = 4, dpi = 300, bg = "white")
+```
+
+```{r}
+library(ggplot2)
+
+# Build a data frame directly from res
+df <- data.frame(
+  N = rep(Ns, each = n.reps),
+  mid.prop = as.vector(t(res.cond))  # flatten by row
+)
+
+# Convert N to a factor so we get 5 separate boxplots
+df$N <- factor(df$N, levels = Ns)
+
+# Plot
+ggplot(df, aes(x = N, y = mid.prop)) +
+  geom_boxplot(fill = "skyblue", alpha = 0.6) +
+  labs(
+    x = "GWAS Sample Size (N)",
+    y = "Proportion of uncertain individuals",
+    title = "Proportion of uncertain individuals in top decile vs GWAS sample size"
+  ) +
+  theme_minimal(base_size = 14)
+
+ggsave(filename = paste0("ucertain-ind-vs-N-in-top", ".png"), 
+       plot = last_plot(), 
+       width = 8, height = 5, dpi = 300, bg = "white")
+```
+
+### **Observation 2: Uncertainty in disease risk is not equal for every individual**
+
+Even with large GWAS and moderate heritability, some individuals’ disease risk remains unstable while others are always almost certainly above/below a risk threshold.
+This is due to where they fall on the liability distribution with their genetic component.
+\* Individuals with genetic component far from the threshold have stable disease risk even with large PGS changes.
+\* Individuals with genetic component near the threshold -\> small changes in PGS have large impact on disease risk.
+\* Individuals near the threshold have the largest variability in predicted disease risk.
+
+Conclusion: PGS-based risk predictions are most unreliable for people near the clinical decision threshold.
+
+```{r}
+
+library(ggplot2)
+library(reshape2)
+
+N = 500000
+n = 10000
+M = 1000
+h2 = 0.5
+n.samples = 1000
+K = 0.1
+
+pgs = PGS.uncertainty(N, M, n, h2)
+
+pgs.samples = pgs$pgs.samples * sqrt(h2) # a (n.samples x n) matrix of n.samples PGS estimates for n individuals
+pgs.gv = pgs$gv * sqrt(h2) # true GVs of n individuals
+
+t = qnorm(1 - K)  # liability threshold for this prevalence  
+true.risks = pnorm(t, pgs.gv, sqrt(1-h2), lower.tail = FALSE) # true risk of individuals, tail probability of genetic value -centered random environmental effects
+
+# RISK OF DISEASE
+sample.risks = pnorm(t, pgs.samples, sqrt(1 - h2), lower.tail = FALSE) # risk of disease for each PGS sample as a tail probability
+
+# TOP TEN INDICES BY PGS SD
+sds = apply(pgs.samples, 2, sd)
+risk.filter = true.risks > 0.01 
+sd.ordered = order(sds, decreasing = TRUE)
+sd.indices = sd.ordered[risk.filter[sd.ordered]][1:10] # interesting indices by pgs sd
+
+# TOP TEN INDICES BY RISK SD
+risk.sd = apply(sample.risks, 2, sd) 
+risk.indices = order(risk.sd, decreasing = TRUE)[1:10] # interesting individuals by risk sd
+
+# Plot risk of disease for individuals with most variation in PGS
+plot.risks = sample.risks[,sd.indices]
+true.risks.i = true.risks[sd.indices]
+
+risks.long = melt(plot.risks, varnames = c("Sample", "PGS_Index"), value.name = "Risk")
+risks.long$RiskPct = risks.long$Risk * 100
+
+real.indices = sd.indices # or risk.indices depending on plot
+
+# print boxplots of risks for top pgs sd individuals
+print(ggplot(risks.long, aes(x = factor(PGS_Index), y = RiskPct)) +
+  geom_boxplot(fill = "lightblue") +
+  #geom_point(data = data.frame(PGS_Index = factor(1:ncol(plot.risks)), Risk = true.risks.i * 100), 
+  #         aes(x = PGS_Index, y = Risk), 
+  #         color = "red", size = 2) +
+  labs(title = paste0("Risk of Disease for 10 individuals with most variation in PGS estimates, K = ", K), x = "Individual (ordered by PGS SD)", y = "Risk of disease (%)") +
+  theme_minimal())
+ggsave(filename = paste0("PGS_variation", ".png"), 
+     plot = last_plot(), 
+     width = 8, height = 4, dpi = 300, bg = "white")
+
+# Plot risk of disease for individuals with most variation in disease risk
+plot.risks = sample.risks[,risk.indices]
+true.risks.i = true.risks[risk.indices]
+
+risks.long = melt(plot.risks, varnames = c("Sample", "PGS_Index"), value.name = "Risk")
+risks.long$RiskPct = risks.long$Risk * 100
+
+real.indices = risk.indices # or risk.indices depending on plot
+
+# print boxplots of risks for top pgs sd individuals
+print(ggplot(risks.long, aes(x = factor(PGS_Index), y = RiskPct)) +
+  geom_boxplot(fill = "lightblue") +
+  geom_point(data = data.frame(PGS_Index = factor(1:ncol(plot.risks)), Risk = true.risks.i * 100), 
+           aes(x = PGS_Index, y = Risk), 
+           color = "red", size = 2) +
+  labs(title = paste0("Risk of Disease for 10 individuals with most variation in disease risk, K = ", K), x = "Individual (ordered by risk SD)", y = "Risk of disease (%)") +
+  theme_minimal())
+ggsave(filename = paste0("risk_variation", ".png"), 
+     plot = last_plot(), 
+     width = 8, height = 5, dpi = 300, bg = "white")
+
+#}
+```
+
+```{r}
+# Riskifunktio (cumulative normal)
+pgs.range = seq(min(pgs.gv) - 1, max(pgs.gv) + 1, length.out = 1000)
+risk.curve = pnorm(t, mean = pgs.range, sd = sqrt(1 - h2), lower.tail = FALSE)
+
+plot(pgs.range, risk.curve, type = "l", col = "blue",
+     xlab = "PGS estimate", ylab = "Disease risk",
+     main = "Disease risk vs. PGS")
+
+# Individuals with largest PGS variance
+points(pgs.gv[sd.indices], true.risks[sd.indices], col = "red", pch = 19)
+y_offsets <- seq(0.05, by = 0.005, length.out = length(sd.indices))
+#y_offsets <- ifelse(seq_along(y_offsets) %% 2 == 0, y_offsets, -y_offsets)
+
+# Add red labels with offset
+#text(pgs$gv[sd.indices], true.risks[sd.indices] + y_offsets,
+#     labels = 1:10,
+#     col = "red", cex = 0.8)
+
+#  Individuals with largest variance in disease risk
+points(pgs.gv[risk.indices], true.risks[risk.indices], col = "darkgreen", pch = 17)
+#text(pgs$pgs.est[risk.indices], true.risks[risk.indices],
+#     labels = risk.indices, pos = 1, col = "darkgreen")
+
+legend("bottomright", legend = c("Top PGS variance", "Top disease risk variance"),
+       col = c("red", "darkgreen"), pch = c(19,17))
+ggsave(filename = paste0("ind-on-risk-function", ".png"), 
+     plot = last_plot(), 
+     width = 8, height = 5, dpi = 300, bg = "white")
+
+
+```
+
+#### Visualization of individual's PGS rankings and corresponding disease risks.
+
+Simulate data and classify each individual into above-threshold, below-threshold, uncertain-above-threshold or uncertain-below-threshold.
+
+```{r}
+library(ggplot2)
+library(patchwork)
+
+N = 100000 # GWAS sample size
+M = 1000 # of SNPs
+n = 1000 # target sample size
+h2 = 0.3 # heritability of breast cancer
+
+pgs = PGS.sample.rankings(N, M, n, h2) # simulate data
+pgs.r = pgs$pgs.rankings # a (n x n.samples) matrix of n.samples PGS rankings for N individuals
+pgs.est = pgs$pgs.est
+
+pgs.ranks.scaled = (pgs.r) / n # scale rankings to [0,1]
+threshold.scaled = 0.9
+
+# function to compute mean and CI for an individual
+get_individual_stats <- function(individual) {
+  ind.pgs.ranks = pgs.ranks.scaled[individual, ] # individuals rankings
+  mean.ranking = mean(ind.pgs.ranks) # mean ranking
+  CI.low = quantile(ind.pgs.ranks, probs = 0.025) 
+  CI.up = quantile(ind.pgs.ranks, probs = 0.975)
+  list(mean = mean.ranking, CI.low = CI.low, CI.up = CI.up)
+}
+
+# classify each individual
+categories = rep(NA, n)
+for (i in 1:n) {
+  stats = get_individual_stats(i)
+  if (stats$CI.up < threshold.scaled) {
+    categories[i] <- "below"
+  } else if (stats$CI.low > threshold.scaled) {
+    categories[i] <- "above"
+  } else if (stats$mean < threshold.scaled) {
+    categories[i] <- "touch_below"
+  } else {
+    categories[i] <- "touch_above"
+  }
+}
+
+# get indices per category
+below_inds <- which(categories == "below")
+above_inds <- which(categories == "above")
+touch_below_inds <- which(categories == "touch_below")
+touch_above_inds <- which(categories == "touch_above")
+
+# print first indices
+cat("Below threshold:", head(below_inds, 10), "\n")
+cat("Above threshold:", head(above_inds, 10), "\n")
+cat("Overlaps threshold, mean below:", head(touch_below_inds, 10), "\n")
+cat("Overlaps threshold, mean above:", head(touch_above_inds, 10), "\n")
+
+# ---- NEW PART: proportion above threshold ----
+prop_above <- rowMeans(pgs.ranks.scaled > threshold.scaled)
+
+# get indices where proportion is between 0.4 and 0.6
+unstable_inds <- which(prop_above >= 0.4 & prop_above <= 0.6)
+
+cat("Indices with 40–60% of samples above threshold:", head(unstable_inds, 20), "\n")
+
+unstable.ranks = pgs.r[unstable_inds, ]
+unstable.scaled <- (unstable.ranks / n) * 100
+dim(unstable.scaled)
+mean.scaled.unstable = rowMeans(unstable.scaled)
+mean.scaled.unstable
+
+```
+
+```{r}
+library(ggplot2)
+
+K = 0.1 # disease prevalence
+individual = 407 # 3 and 407
+
+ind.pgs.ranks = pgs.r[individual, ] # PGS rankings of the individual, a (1 x n.samples) vector
+
+# Scale rankings to [0,1] where 0 = best, 1 = worst
+ind.pgs.ranks.scaled <- (ind.pgs.ranks / n) * 100
+length(which(ind.pgs.ranks.scaled >= 90))
+# Calculate mean and confidence interval on the scaled data
+mean.ranking.scaled <- mean(ind.pgs.ranks.scaled)
+CI.low.scaled <- quantile(ind.pgs.ranks.scaled, probs = 0.025)
+CI.up.scaled <- quantile(ind.pgs.ranks.scaled, probs = 0.975)
+
+# Compute density on scaled rankings
+dens_scaled <- density(ind.pgs.ranks.scaled)
+dens_df <- data.frame(x = dens_scaled$x, y = dens_scaled$y)
+
+# Mark the confidence interval region
+dens_df$in_CI <- with(dens_df, x >= CI.low.scaled & x <= CI.up.scaled)
+
+ggplot(dens_df, aes(x = x, y = y)) +
+  geom_line(color = "black") + # full density curve
+  geom_area(data = subset(dens_df, in_CI), 
+            fill = "skyblue", alpha = 0.6) + # fill only CI region
+  geom_vline(xintercept = 90, color = "red") + # threshold at 90% percentile
+  annotate("text", x = 90, 
+           y = max(dens_df$y)*0.9, # slightly below top of plot
+           label = "Classification threshold", 
+           color = "red", angle = 90, vjust = -0.2, hjust = 1.1) +
+ geom_segment(aes(x = mean.ranking.scaled, xend = mean.ranking.scaled, 
+                 y = 0, yend = max(y)),
+             color = "blue", linetype = "dashed") +
+annotate("text", x = mean.ranking.scaled, y = max(dens_df$y)*0.8, 
+         label = sprintf("Mean percentile: %2.fth", mean.ranking.scaled),
+         color = "blue", angle = 90, vjust = -0.3, hjust = 1.7) +
+  ggtitle("PGS ranking distribution with highlighted 95 % CI") +
+  xlab("PGS Percentile") +
+  ylab("Density") +
+  theme_minimal()
+
+#ggsave(filename = paste0("uncertain-individual", ".png"), 
+#     plot = last_plot(), 
+#     width = 7, height = 5, dpi = 300, bg = "white")
+
+```
+
+Visualize the ranking distribution of a selected individual, with confidence intervals and classification threshold shown, as well as the corresponding disease risks as a boxplot.
+
+```{r}
+library(ggplot2)
+library(patchwork)
+
+K = 0.1 # disease prevalence
+individual = 36 # 3 and 407
+
+# Compute disease risks
+t <- qnorm(1 - K) # risk threshold corresponding to prevalence K
+pgs.sc = scale(pgs.est)
+pgs.ind <- pgs.sc[individual, ] * sqrt(h2) # individual's PGS samples
+risks <- pnorm(t, pgs.ind, sqrt(1 - h2), lower.tail = FALSE) # disease risk as a tail probability
+
+ind.pgs.ranks = pgs.r[individual, ] # PGS rankings of the individual, a (1 x n.samples) vector
+
+# Scale rankings to [0,1] where 0 = best, 1 = worst
+ind.pgs.ranks.scaled <- (ind.pgs.ranks / n) * 100
+
+# Calculate mean and confidence interval on the scaled data
+mean.ranking.scaled <- mean(ind.pgs.ranks.scaled)
+CI.low.scaled <- quantile(ind.pgs.ranks.scaled, probs = 0.025)
+CI.up.scaled <- quantile(ind.pgs.ranks.scaled, probs = 0.975)
+
+# Compute density on scaled rankings
+dens_scaled <- density(ind.pgs.ranks.scaled)
+dens_df <- data.frame(x = dens_scaled$x, y = dens_scaled$y)
+
+# Mark the confidence interval region
+dens_df$in_CI <- with(dens_df, x >= CI.low.scaled & x <= CI.up.scaled)
+
+density_plot <- ggplot(dens_df, aes(x = x, y = y)) +
+  geom_line(color = "black") + # full density curve
+  geom_area(data = subset(dens_df, in_CI), 
+            fill = "skyblue", alpha = 0.6) + # fill only CI region
+  geom_vline(xintercept = 90, color = "red") + # threshold at 90% percentile
+  annotate("text", x = 90, 
+           y = max(dens_df$y)*0.9, # slightly below top of plot
+           label = "Classification threshold", 
+           color = "red", angle = 90, vjust = -0.2, hjust = 1.1) +
+ geom_segment(aes(x = mean.ranking.scaled, xend = mean.ranking.scaled, 
+                 y = 0, yend = max(y)),
+             color = "blue", linetype = "dashed") +
+annotate("text", x = mean.ranking.scaled, y = max(dens_df$y)*0.8, 
+         label = sprintf("Mean percentile: %2.fth", mean.ranking.scaled),
+         color = "blue", angle = 90, vjust = -0.3, hjust = 2.0) +
+  ggtitle("PGS ranking distribution with highlighted 95 % CI") +
+  xlab("PGS Percentile") +
+  ylab("Density") +
+  theme_minimal()
+
+# Boxplot of disease risks
+df_risks <- data.frame(risk = risks * 100)  # convert to %
+boxplot_risks <- ggplot(df_risks, aes(x = factor(1), y = risk)) +
+  geom_boxplot(fill = "lightblue", width = 0.3) +
+  labs(title = "Disease Risk",
+       x = "", y = "Predicted Risk (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank())
+
+# Combine plots side by side
+#combined_plot <- density_plot + boxplot_risks + plot_layout(ncol = 2, widths = c(3, 1))
+combined_plot <- density_plot + boxplot_risks +
+  plot_layout(ncol = 2, widths = c(3, 1)) &
+  theme(plot.margin = margin(2, 2, 2, 2))  # tighten margins
+
+# Save combined plot
+#ggsave("combined-certain1.png", plot = combined_plot, width = 7, height = 5, dpi = 300)
+
+
+
+print(combined_plot)
+
+
+```
+
+### **Observation 3: Target sample size matters for ranking-based use**
+
+When using polygenic scores to identify individuals in high genetic risk of disease, small target sample sizes can cause percentile thresholds to be misestimated.
+This might happen particularly in the tails of the distribution, where sampling variability is highest.
+To classify individuals accurately, target sample sizes should be large (1000 - 10 000).
+
+In practice, percentile-based cutoffs for research purposes should be derived from large enough datasets.
+If only a small number of individuals are to be stratified, the risk classification should be done based on percentiles derived from large datasets, rather that the ordering of individuals within the target sample.
+
+In research, PGSs are often computed for modest-sized target cohorts (n = 1,000–10,000) and ranked internally.
+Smaller target samples cause larger percentile estimation errors, especially in the extreme tails (top 1%).For example, with n = 100, the estimated 99th percentile PGS may differ notably from its true population value, potentially leading to false positives or missed high-risk individuals.
+
+Conclusion: For percentile-based classification, target cohorts should be large enough (n ≥ 10,000) to avoid extreme-tail instability.
+
+```{r}
+PGS.gv.percentiles <- function(N, M, h2, S = 0.75, n.samples = 1000){
+  # N: # of individuals
+  # M: # of SNPs
+  # h2: heritability
+  # S: relative contributions of common vs rare variants
+  # n.samples: # of samples where PGS and its variance are computed from
+  
+  ps = runif(M, 0.001, 0.999) #  allele 1 frequencies for M SNPs
+  var = h2/((2*ps*(1-ps))^S*M) # variance proportional to negative selection coefficient, scaled to match heritability h2 and M SNPs
+  betas = rnorm(M, mean = 0, sd = sqrt(var)) # draw true betas with variance var
+  betas = betas * sqrt(2 * ps * (1 - ps)) # scale betas
+  
+  X <- matrix(rbinom(N * M, size = 2, prob = rep(ps, each = n)), nrow = N, ncol = M) # generate genotypes assuming allele frequencies follow HWE
+  
+  # filter out variants with no variation across individuals
+  idx.filter = apply(X, 2, sd) > 0
+  X = X[, idx.filter]
+  
+  X = scale(X) # standardize genotypes to have mean 0 and variance 1
+
+  gv = X %*% betas[idx.filter] # true genetic values
+  
+  gv.percentiles = quantile(gv, probs = seq(0, 1, 0.01), na.rm = TRUE, names = TRUE)
+  
+  return(list(gv = gv, # true genetic values
+              gv.perc = gv.percentiles
+              ))
+}
+```
+
+```{r}
+N = 500000 # GWAS sample size
+M = 1000 # of SNPs
+h2 = 0.5 # heritability 
+gv = PGS.gv.percentiles(N, M, h2)
+gv.percentiles = gv$gv.perc # true gv percentiles
+
+```
+
+```{r}
+library(ggplot2)
+
+set.seed(123)
+
+N = 500000     # GWAS discovery sample size
+M = 1000       # SNPs
+h2 = 0.5
+
+ns = c(100, 1000, 10000)  # different target sample sizes
+percentiles = c(0.90, 0.95, 0.99)
+names(percentiles) = c("90th", "95th", "99th")
+
+# Simulation parameters
+n.reps = 100
+res_list = list()
+
+for (n_target in ns) {
+  for (pname in names(percentiles)) {
+    vals = numeric()
+    for (rep in 1:n.reps) {
+      pgs.res <- PGS.uncertainty(N = N, M = M, n = n_target, h2 = h2)
+      est.p <- quantile(pgs.res$pgs, probs = percentiles[pname])
+      vals <- c(vals, est.p)
+    }
+    res_list[[length(res_list) + 1]] <- data.frame(
+      TargetSize = factor(n_target),
+      Percentile = pname,
+      Estimate = vals,
+      TrueValue = gv.percentiles[pname]
+    )
+  }
+}
+
+df <- do.call(rbind, res_list)
+```
+
+```{r}
+# True values per percentile
+true_vals_df <- data.frame(
+  Percentile = c("90th", "95th", "99th"),
+  TrueValue = gv.percentiles[c(91, 96, 100)]
+)
+
+# y-position for annotation above the boxes
+y_annot <- max(df$Estimate) * 1.05  
+
+# Data frame for the leftmost annotation only
+annot_df <- data.frame(
+  Percentile = "90th",
+  x_start = 1.2,      # start of mini line
+  x_end = 1.7,        # end of mini line
+  y = y_annot,
+  label = "True percentile"
+)
+
+ggplot(df, aes(x = TargetSize, y = Estimate)) +
+  geom_boxplot(fill = "lightblue") +
+  geom_hline(
+    data = true_vals_df,
+    aes(yintercept = TrueValue),
+    color = "red",
+    linetype = "dashed",
+    size = 1
+  ) +
+  facet_wrap(~Percentile, scales = "fixed") +
+  # Red dashed mini line next to text
+  geom_segment(
+    data = annot_df,
+    aes(x = x_start, xend = x_end, y = y, yend = y),
+    color = "red",
+    linetype = "dashed",
+    size = 1
+  ) +
+  geom_text(
+    data = annot_df,
+    aes(x = x_end + 0.1, y = y, label = label),
+    color = "black",
+    hjust = 0
+  ) +
+  labs(
+    x = "Target Sample Size (n)",
+    y = "Estimated Percentile Value",
+    title = "PGS Percentile Estimates vs. Target Sample Size"
+  ) +
+  theme_minimal() +
+  coord_cartesian(clip = "off")
+
+```
+
+Estimated values at 90th, 95th and 99th percentiles from different size target samples (n), over 100 simulated GWAS samples.
+The red dashed line is the true PGS value at the percentile, estimated from genetic values of 500 000 individuals.
+The estimation error in the highest percentiles gets smaller with increasing target sample size, and the error is larger for more extreme percentiles.
+
+Conclusion: For a small target sample size, ...
+
+```{r}
+library(ggplot2)
+
+set.seed(123)
+# jokaiselle samplelle kerää gv.persentiili-arvoa vastaava peorsentiili
+
+N = 500000     # GWAS discovery sample size
+M = 1000       # SNPs
+h2 = 0.5
+
+ns = c(100, 1000, 10000)  # different target sample sizes
+percentiles = c(0.90, 0.95, 0.99)
+names(percentiles) = c("90th", "95th", "99th")
+true.values = gv.percentiles[c("90%", "95%", "99%")]
+true.values
+
+# Simulation parameters
+n.reps = 100
+res_list = list()
+
+for (n_target in ns) {
+  for (pname in names(percentiles)) {
+    vals = numeric()
+    for (rep in 1:n.reps) {
+      pgs.res <- PGS.uncertainty(N = N, M = M, n = n_target, h2 = h2)
+      est.p <- quantile(pgs.res$pgs, probs = percentiles[pname])
+      vals <- c(vals, est.p)
+    }
+    res_list[[length(res_list) + 1]] <- data.frame(
+      TargetSize = factor(n_target),
+      Percentile = pname,
+      Estimate = vals,
+      TrueValue = gv.percentiles[pname]
+    )
+  }
+}
+
+df <- do.call(rbind, res_list)
+
+```
+
+```{r}
+# Get true values for the selected percentiles
+true.values = gv.percentiles[c("90%", "95%", "99%")]
+
+n.reps = 100
+res_list = list()
+
+for (n_target in ns) {
+  for (pname in names(percentiles)) {
+    # The target true value for this percentile
+    true_val = true.values[paste0(percentiles[pname] * 100, "%")]
+    
+    vals = numeric()
+    for (rep in 1:n.reps) {
+      pgs.res <- PGS.uncertainty(N = N, M = M, n = n_target, h2 = h2)
+      # pgs.res$pgs.samples is n.samples x n_target
+      
+      # For each sample, compute the percentile where the true value falls
+      sample_percentiles <- apply(pgs.res$pgs.samples, 2, function(x) {
+        mean(x <= true_val)  # percentile of true value within sampled PGS
+      })
+      
+      # Average across individuals in the target sample
+      vals <- c(vals, mean(sample_percentiles))
+    }
+    
+    res_list[[length(res_list) + 1]] <- data.frame(
+      TargetSize = factor(n_target),
+      Percentile = pname,
+      TrueInSamplePercentile = vals
+    )
+  }
+}
+
+df <- do.call(rbind, res_list)
+
+```
+
+```{r}
+# True values per percentile (just for annotation)
+true_vals_df <- data.frame(
+  Percentile = c("90th", "95th", "99th"),
+  TruePercentile = c(0.9, 0.95, 0.99)  # reference line at the true population percentile
+)
+
+# y-position for annotation above the boxes
+y_annot <- 1.05  # slightly above 1 since percentiles are [0,1]
+
+# Data frame for the leftmost annotation only
+annot_df <- data.frame(
+  Percentile = "90th",
+  x_start = 1.2,      # start of mini line
+  x_end = 1.7,        # end of mini line
+  y = y_annot,
+  label = "True percentile"
+)
+
+ggplot(df, aes(x = TargetSize, y = TrueInSamplePercentile)) +
+  geom_boxplot(fill = "lightblue") +
+  geom_hline(
+    data = true_vals_df,
+    aes(yintercept = TruePercentile),
+    color = "red",
+    linetype = "dashed",
+    size = 1
+  ) +
+  facet_wrap(~Percentile, scales = "fixed") +
+  # Red dashed mini line next to text
+  geom_segment(
+    data = annot_df,
+    aes(x = x_start, xend = x_end, y = y, yend = y),
+    color = "red",
+    linetype = "dashed",
+    size = 1
+  ) +
+  geom_text(
+    data = annot_df,
+    aes(x = x_end + 0.1, y = y, label = label),
+    color = "black",
+    hjust = 0
+  ) +
+  labs(
+    x = "Target Sample Size (n)",
+    y = "Percentile of True Value in Sample",
+    title = "Percentile of True PGS Value vs. Target Sample Size"
+  ) +
+  theme_minimal() +
+  coord_cartesian(clip = "off")
+
+```
+
+Uncertainty in PGS estimation across target sample sizes is visualized in two ways:
+
+The first figure shows boxplots of the estimated PGS values at fixed population percentiles (90th, 95th, 99th) across repeated simulations.
+This shows how the absolute PGS estimates vary with sample size: smaller target samples yield wider variability, indicating less precise estimation.
+However, because absolute PGS values can differ across traits and scaling methods, this approach provides limited insight into the relative ranking of individuals.
+-\> For an individual at Xth percentile in the population, how their predicted PGS can vary depending on target sample size
+
+The second approach considers the percentile position of a true PGS within each target sample, effectively translating absolute uncertainty into a scale-free, interpretable measure.
+Boxplots of these sample percentiles reveal how extreme individuals in the population may shift across target samples: in smaller samples, even individuals with high true PGS may appear lower in the sample distribution, reflecting substantial individual-level uncertainty.
+This approach directly informs practical applications, such as risk stratification or screening, by showing how reliable PGS-based decisions are for individuals.
+-\> For an individual at Xth percentile in the population, how much their ranking can vary with depending on target sample size
+
+In conclusion, while absolute PGS value plots are useful for understanding overall estimation variability, percentile-based plots provide a more interpretable and actionable measure of individual-level uncertainty, especially relevant for applied or clinical use.
+Together, the two approaches offer complementary perspectives on the effects of target sample size on PGS reliability.
+
+### Sairastumisriski PGS-persentiilillä vaihtelee GWAS-koon, kohdejoukon koon sekä heritabiliteetin kanssa.
+
+Kuva: Minimi- ja maksimiriskit persentiiliä kohden
+
+```{r}
+library(ggplot2)
+library(grid)
+# ----------------------------------------------------------------------------------------------------
+# a function for plotting min and max risks over pgs percentiles
+# ----------------------------------------------------------------------------------------------------
+plot.PGS.uncertainty <- function(N.case = 100000, N.ctrl = 100000, M = 1000, n = 1000, h2 = 0.5, K = 0.01, n.samples = 1000) {
+  
+  phi = N.case/(N.ctrl + N.case) # phi: proportion of cases
+  N.eff = (N.case + N.ctrl) * phi * (1-phi) # compute effective sample size
+  
+  PGS.risk <- PGS.risk.by.ranking(N.eff, M, n, h2, K, n.samples) # Run the risk computation
+  
+  t <- qnorm(1 - K) # liability threshold for this prevalence  
+  pgs_thresh_percentile <- pnorm(t / sqrt(h2)) # PGS percentile corresponding to liablity threshold
+  pgs_thresh_rank <- pgs_thresh_percentile 
+  
+  min_max_df <- data.frame( # collect min and max risks for each ranking
+    Rank = (1:n) / n,
+    Min = PGS.risk$min.risks,
+    Max = PGS.risk$max.risks
+  )
+  
+  max_allowed_rank <- 0.999 
+  max_allowed_idx <- floor(n * max_allowed_rank)
+  
+  uncertainty <- PGS.risk$max.risks - PGS.risk$min.risks # range of rankings (uncertainty)
+  max_idx <- which.max(uncertainty[1:max_allowed_idx]) # index of individual just below threshold
+  max_rank <- max_idx / n # ranking of individual just below threshold
+  max_diff <- uncertainty[max_idx] # range of rankings for individual just below threshold
+  max_min <- PGS.risk$min.risks[max_idx] 
+  max_max <- PGS.risk$max.risks[max_idx]
+  
+  PGS.sorted <- sort(PGS.risk$PGS)
+  PGS.threshold <- PGS.sorted[max_idx]
+  
+  cat(sprintf(
+    "Max uncertainty at percentile %.1d%%: %.2f%% – %.2f%% (Δ=%.2f%%)\n",
+   round(max_rank * 100), max_min * 100, max_max * 100, max_diff * 100
+  ))
+  cat(sprintf("PGS threshold at this percentile: %.4f\n", PGS.threshold))
+  cat(sprintf("PGS threshold percentile for prevalence (K=%.3f): %.2f%%\n", K, pgs_thresh_rank * 100))
+  
+  param_text <- paste(
+    sprintf("N.cases = %d", round(N.case)),
+    sprintf("N.ctrl = %d", round(N.ctrl)),
+    sprintf("M = %d", M),
+    sprintf("n = %d", n),
+    sprintf("h2 = %.2f", h2),
+    sprintf("K = %.3f", K),
+    sep = "\n"
+  )
+  
+  # tekstiboksin muotoilu
+  param_grob <- grobTree(
+    rectGrob(gp = gpar(fill = "white", col = "black", alpha = 0.8)),
+    textGrob(param_text, x = 0.02, y = 0.98, just = c("left", "top"),
+             gp = gpar(col = "black", fontsize = 10, fontface = "bold"))
+  )
+  
+  # Laske ymin ja ymax, vähän yli riskien ylärajan, tekstiboksin rajat
+  ymax_pos <- max(min_max_df$Max) * 1.05
+  ymin_pos <- ymax_pos - 0.37
+  
+  p <- ggplot(min_max_df, aes(x = Rank)) +
+    geom_ribbon(aes(ymin = Min, ymax = Max), fill = "lightblue", alpha = 0.4) +
+    geom_line(aes(y = Min), color = "red", size = 1) +
+    geom_line(aes(y = Max), color = "blue", size = 1) +
+    geom_vline(xintercept = max_rank, linetype = "dashed", color = "black") + # vertical line
+    annotate("point", x = max_rank, y = max_min, color = "red", size = 3) +
+    annotate("point", x = max_rank, y = max_max, color = "blue", size = 3) +
+    labs(
+      title = "Min and Max risks across PGS rankings",
+      subtitle = sprintf(
+        "Max uncertainty at %.1dth percentile with risk %.2f%%–%.2f%% ",
+        round(max_rank * 100), max_min * 100, max_max * 100
+      ),
+      x = "Relative PGS rank",
+      y = "Risk"
+    ) +
+    theme_minimal() +
+    annotation_custom(param_grob, xmin = 0, xmax = 0.2, ymin = ymin_pos, ymax = ymax_pos)
+  
+  print(p)
+  
+  invisible(list(
+    max_uncertainty_percentile = max_rank,
+    max_uncertainty_delta = max_diff,
+    pgs_threshold_percentile = pgs_thresh_rank,
+    pgs_threshold_value = PGS.threshold
+  ))
+}
+
+
+```
+
+With the target sample size large (n = 1000 or 10 000), uncertainty in disease risk decreases with increasing prevalence K.
+With a small target sample (n = 100), the uncertainty is largest when k = 0.01.
+This is explained by the small sample size: when n = 100, with prevalence 0.1 there are \~ 10 diseased individuals, and small changes in the number of diseased individuals do not cause large changes in the disease risk.
+With prevalence 0.001 there are likely no diseased individuals, and thus the disease risk does not vary that much.
+With prevalence 0.01, however, there are likely 0 or 1 diseased individuals, wich causes the risk of disease to vary greatly.
+
+Otherwise, uncertainty in disease risk decreases with inncreasing prevalence, since when there are more diseased individuals, small changes in the number of diseased individuals do not cause large uncertainty in the disease risk.
+
+The uncertainty in the disease risk decreases with increasing number of cases, as when the effective sample size increases, the uncertainty in the GWAS effect sizes decreases.
+This way the uncertainty in individuals PGS estimates decreases, decreasing the uncertainty in disease risk.
+
+As the heritability increases, the disease risk curve gets steeper with environment having a smaller inpact in the disease risk.
+In simulations there is no clear connection between heritability and disease risk.
+
+The target sample size n has a significant impact on the uncertainty in the disease risk.
+The uncertainty is the greatest with small n, but with n = 1000 and 10 000 the uncertainty decreases significantly.
+
+### Example cases
+
+```{r}
+#CHD PGS000019 : h2 = 0.5, K = 0.05, N.case = 60 000, N.ctrl = 120 000, M = 192, n = 725, samples
+h2 = 0.5 # heritability
+K = 0.05 # CHD prevalence
+N.case = 60000 # of cases in GWAS
+N.ctrl = 120000 # of controls in GWAS
+M = 192 # of SNPs in PGS
+n = 725 # target sample size
+samples = 1000 # of samples for each individual
+
+plot.PGS.uncertainty(N.case, N.ctrl, M, n, h2, K, samples)
+
+```

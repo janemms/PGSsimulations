@@ -236,6 +236,8 @@ for (K in Ks){
   }
 
 ```
+
+
 Boxplotin korkeus kertoo miten epävarmuus PGS estimoinnissa siirtyy epävarmuuteen sairausriskin estimoinnissa.
 
 1) Valittu 10 yksilöä, joiden PGS varianssi on suurin. 
@@ -246,6 +248,9 @@ Boxplotin korkeus kertoo miten epävarmuus PGS estimoinnissa siirtyy epävarmuut
 -> Kertoo epävarmuudesta sairastumisriskissä. 
 
  Kuvaajissa laskettu sairastumisriski yksilöille eri PGS estimaateilla, sekä "todellinen sairastumsiriski". Laskut on toistettu eri prevalensseille.
+
+
+
 
 
 ```{r}
@@ -342,14 +347,27 @@ legend("bottomright", legend = c("Top PGS variance", "Top disease risk variance"
 
 - show through simulations that measurement error from finite GWAS sample is main driver of rank discordance across PGIs
 
+- recommend resporting PGIs wirh confidence intervals, and interpreting them with caution
 
-**van Kippersluis, H. et al** Overcoming Attenuation Bias in Regressions using Polygenic Indices: A Comparison of Approaches
 
 **Ware, E. et al** Heterogeneity in polygenic scores for common human traits
 
+- Examined the impact of using genotyped vs imputed SNPs, different p-value thresholds, and different LD trimming methods on the predictive power of PGSs and the correlation among scores.
+
+"the sample size for these GWAS needs to be upwards of 10,000 cases and controls for diseases controlled by 1000 loci with a mean relative risk of 1.04"
+
 **Sun, J. et al** Translating polygenic risk scores for clinical use by estimating the confidence bounds of risk prediction
 
+- Introduce MCCP, a conformal prediction method that provides individual-level confidence estimates for polygenic risk predictions.
+- It splits data into training and calibration sets to compute class-specific p-values for case and control labels.
+- Unlike standard PRS percentiles, MCCP guarantees a bounded error rate and can withhold predictions if confidence is low.
+- Repeated cross-validation ensures stable, calibrated predictions with explicit uncertainty regions for each individual.
 
+--> Provides absolute confidence of classification per individual
+
+- Unlike standard PRS percentiles that compare individuals to the population, MCCP provides calibrated, individual-specific uncertainty bounds, ensuring predictions are only made when confidence meets a preset threshold.
+
+**Schultz, L. M. et al** Stability of polygenic scores across discovery genome-wide association studies
 
 ### Uusi visualisointi
 
@@ -450,10 +468,9 @@ cat(sprintf("PGS threshold at %.2f%% percentile for prevalence K=%.2f\n",
             pgs_thresh_rank * 100, K * 100))
 
 # plot risks by PGS ranking
-
 library(ggplot2)
 
-# Data frame for min/max risks
+# df for min/max risks
 min_max_df <- data.frame(
   Rank = (1:n) / n,  # Scale rank to [0,1]
   Min = PGS.risk$min.risks,
@@ -472,14 +489,13 @@ max_max <- PGS.risk$max.risks[max_idx]  # max risk at this percentile
 PGS.sorted <- sort(PGS.risk$PGS)  # sorted PGS scores
 PGS.threshold <- PGS.sorted[max_idx]  # PGS value at max uncertainty
 
-# --- Print summary ---
+# tulosta tiivistelmä
 cat(sprintf(
   "Max uncertainty at percentile %.1f%%: %.2f%% – %.2f%% (Δ=%.2f%%)\n",
   max_rank * 100, max_min * 100, max_max * 100, max_diff * 100
 ))
 cat(sprintf("PGS threshold at this percentile: %.4f\n", PGS.threshold))
 
-# Plot with annotation
 ggplot(min_max_df, aes(x = Rank)) +
   geom_ribbon(aes(ymin = Min, ymax = Max), fill = "lightblue", alpha = 0.4) +
   geom_line(aes(y = Min), color = "red", size = 1) +
@@ -595,11 +611,7 @@ plot_PGS_uncertainty <- function(N.case = 100000, N.ctrl = 100000, M = 1000, n =
 
 
 ```
-Laskin useasta GWASista (n.samples) PGSt n yksilöille, järjestin ne ja laskin joukon sairastumisriskejä jokaiselle kohdalle PGS jakaumassa. Kuvaajissa on sinisellä sairastumisriskien maksimit ja punaisella minimit, ja pisteillä on merkitty kohta jossa näiden erotus on suurin.
-Esimerkiksi ensimmäisessä kuvassa parametreillä N = 500 000, h2 = 0.5, n = 10 000 ja K = 0.1, epävarmuus sairastumisriskissä on melko pientä. Toisessa kuvassa, kun heritabiliteetti on korkeampi (h2 = 0.8) ja tarkastellaan pienempää yksilöjoukkoa (n = 1000), epävarmuus sairastumisriskissä on yli 10 prosenttiyksikön luokkaa.
-Kolmannessa kuvassa näkyy esimerkki suuresta epävarmuudesta, kun tarkastellaa pientä yksilöjoukkoa (n = 100) ja sekä prevalenssi että heritabiliteetti ovat korkeat.
 
-Kun n = 1000 tai 10 000, epävarmuus pienenee kun K kasvaa. Kun yksilöjoukko on pieni (n = 100), niin epävarmuus on suurinta kun K = 0.01 (vs 0.1 tai 0.001).
 
 ```{r}
 Ns = c(50000, 100000, 300000, 500000)
@@ -638,7 +650,7 @@ for (N in Ns) {
 ## With effective sample size
 
 ```{r}
-N.cases = c(10000, 50000, 100000)
+N.cases = c(10000, 50000) #, 100000)
 N.ctrl = 100000
 #N = 500000
 M = 1000
@@ -647,20 +659,54 @@ n = 1000
 h2s = c(0.2, 0.5, 0.8)
 h2 = 0.5
 Ks = c(0.001, 0.01, 0.1)
+K = 0.01
 samples = 1000
 
-for (K in Ks) {
-  for (h2 in h2s) {
+
+  #for (h2 in h2s) {
     for (N.case in N.cases) {
       for (n in ns) {
+        for (K in Ks) {
           plot_PGS_uncertainty(N.case, N.ctrl, M, n, h2, K, samples)
       }
     }
-  }
+  #}
 }
 
-
 ```
+CHD PGS000349: h2 = 0.5, K = 0.05, N.case = 60 000, N.ctrl = 120 000, M = 70, n = 4800, samples
+
+CHD PGS000019: h2 = 0.5, K = 0.05, N.case = 60 000, N.ctrl = 120 000, M = 192, n = 725, samples
+
+CHD PGS000200: h2 = 0.5, K = 0.05, N.case = 15 000, N.ctrl = 15 000, M = 28, n = 725, samples
+
+Lung cancer: h2 = 0.2, K = 0.05, N.case = 60 000, N.ctrl = 120 000, M = 16, n = 30 000
+
+```{r}
+#CHD PGS000019 : h2 = 0.5, K = 0.05, N.case = 60 000, N.ctrl = 120 000, M = 192, n = 725, samples
+h2 = 0.5 
+K = 0.05 
+N.case = 60000 
+N.ctrl = 120000 
+M = 192
+n = 725
+samples = 1000
+plot_PGS_uncertainty(N.case, N.ctrl, M, n, h2, K, samples)
+
+#ggsave(filename = paste0("PGSrisk_CHD_0019", ".png"), 
+#       plot = last_plot(), 
+#       width = 8, height = 5, dpi = 300, bg = "white")
+
+  
+```
+
+
+Simulaatioissa näyttää, että epävarmuus persentiilin sairastumisriskissä kasvaa SNP-määrän kasvaessa, mutta uskoisin että todellisuudessa suurempi SNP-määrä kuvaa geneettistä riskiä paremmin.
+
+
+
+
+
 
 Kun n = 1000 tai 10 000, epävarmuus pienenee kun K kasvaa. Kun yksilöjoukko on pieni (n = 100), niin epävarmuus on suurinta kun K = 0.01 (vs 0.1 tai 0.001). 
 - kun n = 100, prevalenssilla 0.1 sairastuneita yksilöitä on noin 10, prevalenssilla 0.01 sairastuneita on noin 1 ja prevalenssilla 0.001 sairastuneita ei todennäköisesti ole. Siten prevalensseilla 0.1 ja 0.001 simulaatioissa näkyy melko pientä epävarmuutta sairastumisriskissä, mutta prevalenssilla 0.01 sairastuneita on joko 0 tai 1, mikä aiheuttaa korkeamman epävarmuuden riskiin.

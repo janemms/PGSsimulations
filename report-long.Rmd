@@ -16,41 +16,6 @@ knitr::opts_chunk$set(echo = TRUE)
 - Näytä esimerkkejä joissa simulaation parametrit vastaavat julkaistuja tutkimukseia, esim CHD epävarmuus
 --> toisaalta näytä miten realistisilla parametreilla PRS epävarmuus pienenee
 
-### muistiinpanot
-
-*summary.txt*
-Uncertainty in the individual Polygenic Risk Scores
-
-We study the uncertainty in INDIVIDUALs PGSs by looking at both the numerical values of the PGS estimate, and the ranking of the individual made by ordering the PGS estimates of individuals from the same GWAS. 
-In research applications, individuals PGS is compared to a reference threshold value for high genetic risk. The threshold value is computed in large subset of a population, and aims to represent the true genetic value at the top-n% risk threshold.
-
-We have looked into the uncertainty in the PGS estimates in multiple ways:
-1) Studied the effect of heritability and GWAS training sample size (used to obtain estimates for genetic effects) to the individual PGS variance analytically.
-
-2) Studied the proportion of certain-above -threshold inividuals among those whose PGS point estimate exceeds the threshold, as a function of GWAS sample size and heritability.
-
-We have studied the variability in individuals ranks by:
-1) Sampling PGS estimates for individuals, and computing rankings for the individuals in each sample, we have studied the mean ranking of an individual, as well as the range of rankings.
-
-2) For each individual we have studied the proportion of rankings in the top-PGS quantile
-
-In relation to the liability threshold model of disease susceptibility, we have:
-1) Studied the risk of disease with specific genotype, by sampling environmental effects. 
-
-2) Computed the mean risk of disease by PGS decile, studying the liabilities of the individuals stratified by PGS.
-
-3) Calculated the liability of individuals in the top-PGS quantile, as well as the prevalence of disease among those individuals.
-
-Finally, we 
-1) Estimated the true Polygenic Risk distribution in the population and compute the PGS values at percentiles. Looked into the stability of the percentiles as a function of sample size.
-
-2) Estimate PGSs for individuals using genetic effects from "GWAS", and compare the PGS percentiles to the true values as a function of the estimation sample size.
-
-3) Look into the error in estimating the top-PGS-quantile values with different estimation sample sizes.
-
-Kuinka usein yksilö, joka oikeasti 90th kvantiililla, on estimaattien mukaan siellä
-
-
 
 ### Introduction (short background)
 Polygenic risk scores (PRS) are increasingly used to estimate an individual’s genetic disease risk using variants found in GWAS. There are hopes to use PRSs in clinical setting to [kohdentaa] screenings and preventative treatments to those in high risk of disease. The accuracy of PRSs is usually studied with cohort-level metrics such as R^2 and AUC, but the individual-level accuracy of prediction is less studied.
@@ -61,7 +26,7 @@ This report summarizes simulations exploring how such uncertainty propagates to 
 
 ### Methods
 #### PGS computation
-To calculate PRSs for a set of individuals over M SNPs, we first generate allele frequencies for said SNPs by drawing them from uniform distribution. We simulate genetic effects for each variant (betas) by drawing them from a normal distribution with mean zero and variance $ h2/((2*ps*(1-ps))^S*M)$, with S = - 0.75, as in [1]. This way the variance explained by the variants is scaled to match heritability h2, and more common variants have smaller effects. We assume the M SNPs to be independent, meaning we do not consider LD.
+To calculate PRSs for a set of individuals over M SNPs, we first generate allele frequencies for said SNPs by drawing them from uniform distribution. We simulate genetic effects for each variant (betas) by drawing them from a normal distribution with mean zero and variance $ h2/((2*ps*(1-ps))^S*M)$, with S = 0.75, as in [1]. This way the variance explained by the variants is scaled to match heritability h2, and more common variants have smaller effects. We assume the M SNPs to be independent, meaning we do not consider LD.
 
 Assuming the genotypes are standardized to have mean zero and unit variance, we simulate the genetic effects obtained from GWAS by adding random noise around the true genetic effects. Following [2], we draw the genetic effect estimate for each variant from a normal distribution centered at the true genetic effect, with variance $1/N *(1 - h2/((2*ps*(1-ps))^S*M))$.
 
@@ -70,8 +35,9 @@ We generate genotypes for n individuals, and standardize them. As SNPs with no v
 Polygenic risk scores are computed for each individual as the sum of risk allele counts, weighted by their genetic effect size. As we have generated both the true genetic effect sizes (betas) and the estimates usually obtained from GWAS, we can compute both the true genetic value of an individual, as well as PRS samples corresponding to different GWASs.
 
 The variance in individual PRS estimates can be calculated either analytically or empirically from the PRS samples. 
+
 ```{r}
-PGS.uncertainty <- function(N, M, n, h2, S = -0.75, n.samples = 1000){
+PGS.uncertainty <- function(N, M, n, h2, S = 0.75, n.samples = 1000){
   # N: # of individuals
   # M: # of SNPs
   # n: # of individuals whose PGS is to be computed
@@ -83,7 +49,6 @@ PGS.uncertainty <- function(N, M, n, h2, S = -0.75, n.samples = 1000){
   var = h2/((2*ps*(1-ps))^S*M) # variance proportional to negative selection coefficient, scaled to match heritability h2 and M SNPs
   betas = rnorm(M, mean = 0, sd = sqrt(var)) # draw true betas with variance var
   betas = betas * sqrt(2 * ps * (1 - ps)) # scale betas
-  
   
   beta.samples = matrix(nrow = n.samples, ncol = M) # collect n.samples of beta estimates
   
@@ -260,7 +225,7 @@ n = 10000 # target sample size
 h2 = 0.5 # heritability on liability scale
 K = 0.1 # disease prevalence
 tPGS = 0.90 # top PGS quantile threshold
-S = -0.75 # selection parameter 
+S = 0.75 # selection parameter 
 
 PGSs = PGS.uncertainty(N, M, n, h2) # Generate genotypes and compute PGS
 PGS = PGSs$pgs 
@@ -292,7 +257,7 @@ In this section we do simulations on the relative rankings of individual Polygen
 # Function for calculating sample PGS estimates and their relative rankings, and proportions
 # of ranking exceeding the PGS stratification quantile t
 # ----------------------------------------------------------------------------------------------------
-PGS.sample.rankings <- function(N, M, n, h2, n.samples = 1000, S = -0.75, t = 0.9){
+PGS.sample.rankings <- function(N, M, n, h2, n.samples = 1000, S = 0.75, t = 0.9){
   # N: # of individuals in GWAS used to estimate effect sizes
   # M: # of SNPs
   # n: # of individuals whose PGS is to be computed
@@ -303,12 +268,12 @@ PGS.sample.rankings <- function(N, M, n, h2, n.samples = 1000, S = -0.75, t = 0.
   
   ps = runif(M, 0, 1) #  allele 1 frequencies for M SNPs
   var = h2/((2*ps*(1-ps))^S*M) # variance proportional to negative selection coefficient, scaled to match heritability h2 and M SNPs
-  sigma.est = 1/N *(1 - var) # effects of SNPs can be estimated with variance proportional to their allele frequency (rare alleles have larger effect sizes, and larger effect sizes can be estimated with smaller uncertainty)
+  sigma.est = pmax(1/N * (1 - var), 0) # effects of SNPs can be estimated with variance proportional to their allele frequency (rare alleles have larger effect sizes, and larger effect sizes can be estimated with smaller uncertainty)
   betas = rnorm(M, mean = 0, sd = sqrt(var)) # draw betas with variance var
   
   X <- matrix(rbinom(n * M, size = 2, prob = rep(ps, each = n)), nrow = n, ncol = M) # generate genotypes for n individuals assuming allele frequencies follow HWE (n x M)
   
-  # filter out SNPs with no variation
+  # filter out SNPs with no variation 
   idx.filter = apply(X, 2, sd) > 0
   X = X[, idx.filter]
   X = scale(X, center = TRUE, scale = TRUE)
@@ -392,7 +357,7 @@ ranking.stats = matrix(nrow = n, ncol = n.stats )
 rank.correlations = matrix(nrow = n, ncol = 1) 
 proportions = matrix(nrow = n, ncol = 1) # proportion of PGS estimates over t for each individual, for each N and h2
 
-pgs.sample.rankings = PGS.sample.rankings(N, M, n, h2, n.samples, S = -0.75, t)
+pgs.sample.rankings = PGS.sample.rankings(N, M, n, h2, n.samples, S = 0.75, t)
 
 # collect stats
 rankings = pgs.sample.rankings$pgs.rankings # output is a (n x n.samples) matrix of rankings of n.samples PGS estimates for n individuals
@@ -475,7 +440,7 @@ n.samples = 100 # of samples calculated for each individual
 t = 0.9 # 
 n = 10000 # target sample size
 
-v.rankings = PGS.sample.rankings(N, M, n, h2, n.samples, S = -0.75, t) # simulate data
+v.rankings = PGS.sample.rankings(N, M, n, h2, n.samples, S = 0.75, t) # simulate data
 pgs.rankings = v.rankings$pgs.rankings  # a (n x n.samples) matrix of PGS samples (every row corresponds to an individual)
 pgs.est = v.rankings$pgs.est  # a (n x n.samples) matrix of rankings of n.samples PGS estimates for n individuals (every row corresponds to an individual)
 
@@ -566,9 +531,10 @@ n = 10000 # target sample size
 h2 = 0.5 # heritability
 
 pgs = PGS.sample.rankings(N, M, n, h2) # simulate data
-pgs.r = pgs$pgs.est # a (n x n.samples) matrix of n.samples PGS rankings for N individuals
+pgs.r = pgs$pgs.rankings # a (n x n.samples) matrix of n.samples PGS rankings for N individuals
+pgs.est = pgs$pgs.est
 
-pgs.ranks.scaled = (pgs.ranks) / n # scale rankings to [0,1]
+pgs.ranks.scaled = (pgs.r) / n # scale rankings to [0,1]
 threshold.scaled = 0.9
 
 # function to compute mean and CI for an individual
@@ -614,14 +580,14 @@ Visualize the ranking distribution of a selected individual, with confidence int
 library(ggplot2)
 
 K = 0.1 # disease prevalence
-individual = 59
+individual = 15
 
 # Compute disease risks
 t <- qnorm(1 - K) # risk threshold corresponding to prevalence K
-pgs.ind <- pgs.r[individual, ]  # individual's PGS samples
+pgs.ind <- pgs.est[individual, ]  # individual's PGS samples
 risks <- pnorm(t, pgs.ind, sqrt(1 - h2), lower.tail = FALSE) # disease risk as a tail probability
 
-ind.pgs.ranks = pgs.ranks[individual, ] # PGS rankings of the individual, a (1 x n.samples) vector
+ind.pgs.ranks = pgs.r[individual, ] # PGS rankings of the individual, a (1 x n.samples) vector
 
 # Scale rankings to [0,1] where 0 = best, 1 = worst
 ind.pgs.ranks.scaled <- (ind.pgs.ranks / n) * 100
@@ -855,7 +821,7 @@ Kuvaajissa laskettu sairastumisriski yksilöille eri PGS estimaateilla, sekä "t
 # ---------------------------------------------------------------------------------------------------------------------
 # a function for computing disease risks (min, max and mean risk, range and variance) for pgs ranking positions over a sample of individuals 
 # ---------------------------------------------------------------------------------------------------------------------
-PGS.risk.by.ranking <- function(N, M, n, h2, K, n.samples, S = -1){
+PGS.risk.by.ranking <- function(N, M, n, h2, K, n.samples, S = 1){
   # N: # of individuals in GWAS used to estimate effect sizes
   # M: # of SNPs
   # n: # of individuals whose PGS is to be computed
@@ -1006,7 +972,6 @@ As the heritability increases, the disease risk curve gets steeper with environm
 
 The target sample size n has a significant impact on the uncertainty in the disease risk. The uncertainty is the greatest with small n, but with n = 1000 and 10 000 the uncertainty decreases significantly.
 
-
 ### Example cases
 ```{r}
 #CHD PGS000019 : h2 = 0.5, K = 0.05, N.case = 60 000, N.ctrl = 120 000, M = 192, n = 725, samples
@@ -1022,49 +987,8 @@ plot.PGS.uncertainty(N.case, N.ctrl, M, n, h2, K, samples)
 
 ```
 
-#### Simulations matching CHD parameters
-
-Verification of liability distribution.
-PGS scaling, thresholding, and uncertainty propagation.
-Uncertainty in disease risk with fixed genotype vs. varying environment.
-3.2 PGS ranking simulations
-Variability in individual rankings between simulations.
-Proportion of individuals reliably above/below a threshold.
-Correlation between rankings as a function of N and h².
-3.3 Population risk estimation
-Stability of PGS percentiles with increasing sample size.
-Uncertainty from finite estimation sample and GWAS beta estimation.
-3.4 Uncertainty propagation to disease risk estimates
-Boxplots for individuals with highest PGS variance and risk variance.
-Effect of prevalence, sample size, and heritability.
-Example Cases (realistic parameters)
-Simulations matching CHD parameters (e.g. h² ≈ 0.4, N ≈ 500k).
-Show how uncertainty in PGS/risk diminishes with large N.
-Discussion
-Summary of key findings on uncertainty.
-Implications for using PRS in research and clinical settings.
-Appendix
-Essential code snippets and additional figures.
-
-
-
-Lähetä matille:
-ranking distributionit mutta sairastumisriskillä / riskiplotit todellisten tutkimusten parametreillä
-pitääkö betat skaalata? ei
-
+# References
 
 [1] Theoretical and empirical quantification of the accuracy of polygenic scores in ancestry divergent populations
 [2] Large uncertainty in individual polygenic risk score estimation impacts PRS-based risk stratification
 [3] Heritable polygenic editing: the next frontier in genomic medicine?
-
-
-idea
-
-voiko soveltaa käytäntöön ja onko lähestyminen sama kuin Ding et al paperissa?
-
-Ding et al: 
-- jokaiselle yksilölle lasketaan GV posteriorijakauma, joka avulla lasketaan posteriori sd sekä credible intervallit PRSlle. 
-- Paperissa johdetaan myös analyyttinen laskukaava yksilön PRS sd:lle. 
-
-
-# esityksen hahmottelu

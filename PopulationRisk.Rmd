@@ -509,7 +509,7 @@ ggplot(dens_df, aes(x = x, y = y)) +
 
 ```{r}
 source("PGSvariance.R")
-N = 300000
+N = 500000
 M = 1000
 n = 10000
 h2 = 0.5
@@ -518,10 +518,11 @@ pgs = PGS.sample.rankings(N, M, n, h2)
 pgs.ranks = pgs$pgs.rankings # a (n x n.samples) matrix of n.samples PGS rankings for N individuals
 ```
 
+Luokittele yksilöt varmasti yli-t, varmasti alle-t, epävarma yli-t, epävarma alle-t:
 ```{r}
 source("PGSvariance.R")
 
-# Scale rankings to [0,1]: 0 = best, 1 = worst
+# Scale rankings to [0,1]
 pgs.ranks.scaled = (pgs.ranks) / n
 threshold.scaled = 0.9
 # Function to compute mean + CI for an individual
@@ -562,9 +563,8 @@ cat("Touches threshold, mean above:", head(touch_above_inds), "\n")
 
 ```
 
-
 ```{r}
-individual = 32
+individual = 203
 ind.pgs.ranks = pgs.ranks[individual, ] # PGS rankings of the individual, a (1 x n.samples) vector
 
 # Scale rankings to [0,1] where 0 = best, 1 = worst
@@ -608,6 +608,95 @@ annotate("text", x = mean.ranking.scaled, y = max(dens_df$y)*0.8,
 #ggsave(filename = paste0("individual-ranking-distribution-uncertain-above", ".png"), 
 #       plot = last_plot(), 
 #       width = 8, height = 5, dpi = 300, bg = "white")
+
+```
+
+```{r}
+source("PGSvariance.R")
+N = 500000
+M = 1000
+n = 10000
+h2 = 0.5
+
+#pgs = PGS.sample.rankings(N, M, n, h2)
+pgs.r = pgs$pgs.est # a (n x n.samples) matrix of n.samples PGS rankings for N individuals
+```
+
+```{r}
+t = qnorm(1 - K)
+pgs.ind = pgs.r[individual, ]
+risks = pnorm(t, pgs.ind, sqrt(1-h2), lower.tail = FALSE)
+
+library(ggplot2)
+
+# Your risk vector from the first individual
+df_risks <- data.frame(risk = risks * 100)  # convert to percentage for better readability
+
+# Boxplot for the individual risk samples
+ggplot(df_risks, aes(x = factor(1), y = risk)) +
+  geom_boxplot(fill = "lightblue", width = 0.3) +
+  labs(title = "Boxplot of Disease Risks for Individual 1",
+       x = "", y = "Predicted Disease Risk (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank())
+
+
+
+```
+
+
+```{r}
+library(ggplot2)
+library(patchwork)
+
+# Compute disease risks
+t <- qnorm(1 - K)
+pgs.ind <- pgs.r[individual, ]  # Individual's PGS samples
+risks <- pnorm(t, pgs.ind, sqrt(1 - h2), lower.tail = FALSE)
+
+# Mark the confidence interval region
+dens_df$in_CI <- with(dens_df, x >= CI.low.scaled & x <= CI.up.scaled)
+
+
+density_plot <- ggplot(dens_df, aes(x = x, y = y)) +
+  geom_line(color = "black") + # full density curve
+  geom_area(data = subset(dens_df, in_CI), 
+            fill = "skyblue", alpha = 0.6) + # fill only CI region
+  geom_vline(xintercept = 90, color = "red") + # threshold at 90% percentile
+  annotate("text", x = 90, 
+           y = max(dens_df$y)*0.9, # slightly below top of plot
+           label = "Classification threshold", 
+           color = "red", angle = 90, vjust = -0.5, hjust = 1.1) +
+ geom_segment(aes(x = mean.ranking.scaled, xend = mean.ranking.scaled, 
+                 y = 0, yend = max(y)),
+             color = "blue", linetype = "dashed") +
+annotate("text", x = mean.ranking.scaled, y = max(dens_df$y)*0.8, 
+         label = sprintf("Mean percentile: %2.fth", mean.ranking.scaled),
+         color = "blue", angle = 90, vjust = -0.5, hjust = 1.1) +
+  ggtitle("PGS ranking distribution with highlighted 95 % CI") +
+  xlab("PGS Percentile") +
+  ylab("Density") +
+  theme_minimal()
+
+# Boxplot of disease risks
+df_risks <- data.frame(risk = risks * 100)  # convert to %
+boxplot_risks <- ggplot(df_risks, aes(x = factor(1), y = risk)) +
+  geom_boxplot(fill = "lightblue", width = 0.3) +
+  labs(title = "Disease Risk",
+       x = "", y = "Predicted Risk (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank())
+
+# Combine plots side by side
+combined_plot <- density_plot + boxplot_risks + plot_layout(ncol = 2, widths = c(3, 1))
+
+print(combined_plot)
+
+ggsave(filename = paste0("individual-ranking-disease-uncertain-above", ".png"), 
+       plot = last_plot(), 
+       width = 8, height = 5, dpi = 300, bg = "white")
 
 ```
 
