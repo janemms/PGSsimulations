@@ -163,7 +163,7 @@ apply(proportions, 2, max)
 
 ```{r}
 # Split into groups for clearer plotting
-n.groups = 510  # number of groups 
+n.groups = 50  # number of groups 
 
 group.means = matrix(NA, nrow = n.groups, ncol = ncol(proportions)) # a matrix to store means: rows = groups, cols = N-h2-groups
 

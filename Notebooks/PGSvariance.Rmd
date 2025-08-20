@@ -105,6 +105,7 @@ summary(pgs.sample.unc$variance)
 ```
 
 #### Sampled PGS variance with different N
+We study the variance in the PGS estimates caused by the uncertainty in the effect estimates by calculating the PGS variance analytically as a variance of the linear combination. We notice that, as expected, the variance in the individual PGS estimated decreases with increasing sample size.
 
 ```{r}
 source("PGSvariance.R")
@@ -139,7 +140,7 @@ ggplot(df, aes(x = N, y = Variance)) +
 ```
 
 ### Sample size vs. individual PGS variance
-
+We further simulate the variance in the individual PGS estimates as a function of GWAS training sample size N and heritability h2. We conclude that the variance decreases with both increasing sampels size N and increasing heritability. This makes sense as when larger proportion of the variation in the phenotype is explained by the genetic effects, we can estimate the genetic effect more precisely. 
 ```{r}
 rho = 0.95 # confidence level
 S = -1 # selection coefficient
@@ -148,10 +149,12 @@ S = -1 # selection coefficient
 M = 1000 and N = 1000, 10 000, 100 000, 250 000, 500 000 - h2 = 0.1, 0.25, 0.5, 0.8
 
 ```{r}
+source("PGSvariance.R")
 M = 1000 # of SNPs
 h2s = c(0.1, 0.25, 0.5, 0.8) # heritabilities
 Ns = c(1000, 10000, 100000, 250000, 500000) # of individuals
 t = 0.9 # 
+n = 10000 
 certain.proportions.s1 = matrix(nrow = length(Ns), ncol = 2*length(h2s))
 df.var.list = list() # list to store data frames
 for (j in 1:length(h2s)){
@@ -163,7 +166,6 @@ for (j in 1:length(h2s)){
     pgs.unc = PGS.uncertainty(Ns[i], M, h2s[j], S)
     pgs[[i]] = pgs.unc$pgs # PGSs for N = Ns[i]
     pgs.vars[[i]] = pgs.unc$variance # variances of PGSs for N = Ns[i]
-    
     ord = ordered.estimates(pgs.unc$pgs, pgs.unc$variance, t, rho) # collect certain proportions
     ordered[i, ] = c(ord$prop.certain.below, ord$prop.certain.above)
   }
@@ -180,6 +182,7 @@ for (j in 1:length(h2s)){
  }
 ```
 
+We demonstrate how the proportion of individuals certain-above/below the PGS risk threshold increases with sample size and heritability.
 ```{r}
 #Label the rows by sample size and columns by heritability + position
 rownames(certain.proportions.s1) = paste0("N=", Ns)
@@ -227,7 +230,7 @@ ggplot(df.prop, aes(x = SampleSize, y = Proportion, fill = Direction)) +
 
 
 ```
-
+The mean variance decreases with sample size and heritability.
 ```{r}
 df.var = do.call(rbind, df.var.list)
 df.var$h2 = factor(df.var$h2)
@@ -476,3 +479,8 @@ rownames(ordered) = c("t = 0.9", "t = 0.95", "t = 0.99")
 ordered
 kable(ordered)
 ```
+
+
+
+
+

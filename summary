@@ -1,0 +1,86 @@
+Uncertainty in the individual Polygenic Risk Scores
+
+We study the uncertainty in INDIVIDUALs PGSs by looking at both the numerical values of the PGS estimate, and the ranking of the individual made by ordering the PGS estimates of individuals from the same GWAS. 
+In research applications, individuals PGS is compared to a reference threshold value for high genetic risk. The threshold value is computed in large subset of a population, and aims to represent the true genetic value at the top-n% risk threshold.
+
+We have looked into the uncertainty in the PGS estimates in multiple ways:
+1) Studied the effect of heritability and GWAS training sample size (used to obtain estimates for genetic effects) to the individual PGS variance analytically.
+
+2) Studied the proportion of certain-above -threshold inividuals among those whose PGS point estimate exceeds the threshold, as a function of GWAS sample side and heritability.
+
+We have studied the variability in individuals ranks by:
+1) Sampling PGS estimates for individuals, and computing rankings for the individuals in each sample, we have studies the mean ranking of an individual, as well as the range of rankings.
+
+2) For each individual we have studied the proportion of rankings in the top-PGS quantile
+
+Inrelation to the liability threshold model of disease susceptibility, we have:
+1) Studied the risk of disease with specific genotype, by sampling environmental effects. 
+
+2) Computed the mean risk of disease by PGS decile, studying the liabilities of the individuals stratified by PGS.
+
+3) Calculated the liability of individuals in the top-PGS quantile, as well as the prevalence of disease among those individuals.
+
+Finally, we 
+1) Estimated the true Polygenic Risk distribution in the population and compute the PGS values at percentiles. Looked into the stability of the percentiles as a function of sample size.
+
+2) Estimate PGSs for individuals using genetic effects from "GWAS", and compare the PGS percentiles to the true values as a function of the estimation sample size.
+
+3) Look into the error in estimating the top-PGS-quantile values with different estimation sample sizes.
+
+
+
+Kuinka usein yksilö, joka oikeasti 90th kvantiililla, on estimaattien mukaan siellä
+
+# esityksen hahmottelu
+
+- Polygenic scores, what they are yms
+- When creating new polygenic scores, their performance is usually measured with population-level metrics such as R2 our AUC. For practical utility, however, a more interesting question is, how uncertain are individual PRS estimates. So for example, if an individual is stratified to be in the top PRS decile, how certain are we that their true genetic value is there. Or, [add a similar question]
+
+- This uncertainty in the individual PRS estimates stems from many sources, the main two being the uncertainty about which variants are causal, and the uncertainty in the causal effect estimates (from finite GWAS sample size and precence of LD). In practice, other parameters such as heritability, target sample size and disease prevalence affect this uncertainty. 
+- There are two ways of stratifying individuals based on polygenic scores:
+  1) Computing the PGSs of a group of individuals (1000-10000) and ordering them based on PGS estimates.
+  --> This approach used widely in research when estimating polygenic risk of different diseases, or assessing performance of PRSs.
+  2) Computing PGSs for a large group of individuals to estimate the PGS distribution in population. Later it is enough to compute PGS for a single individual, and compare it to the     "population" estimate to see what the individual's risk is compared to the population.
+  --> This approach closer to a real-life situation, how PGSs would be used in healthcare.
+- I mostly focused on approach (1), as it is easier to model and most current research has been using that approach. 
+
+- How betas estimated [[[[]]]]
+
+- The question can be looked at in many ways, and here are just few of my approaches.
+
+
+- First I studied the effect of heritability and GWAS training sample size on the individual PGS variance, both analytically and throught samples
+  --> analytical formula possible as SNPs are assumed to be independent
+  - As expected, individual PGS variance decreases with increasing GWAS sample size and heritability
+
+- In the spirit of Ding et al, individuals can be classified into certain-above, uncertain--above, uncertain-below and certain-below -individuals [visualization]
+  - Studied the proportion of certain-above -threshold inividuals among those whose PGS point estimate exceeds the threshold, as a function of GWAS sample size and heritability
+  --> 
+  
+- Another way to quantify the uncertainty is to look at the rankings of an individual, and how much they vary across "GWASs" [pgs arvot + rankingit visualisointi]
+  - Calculated mean ranking for each individual as well as the range of rankings
+  --> 
+  - calculated proportion of rankings in the top PGS-quantile
+  --> proportion approaches 0 or 1 with increasing N and h2
+  - order-correlation of individual's rankings
+  
+- To study the disease risk I used the liability threshold model, where the liability of an individual comprises of a genetic and environmental component. If the liability value      exceeds a threshold, the individual is diseased
+  - Allows to study risk of disease with a specific genotype by sampling environmental effects or calculating them from the tail of the distribution
+  - Computed disease prevalence in the top-PGS-quantile
+  [disease risk visualization]
+  
+  - How does the uncertainty in PGS estimation propagate into uncertainty in the disease risk estimation?
+  - [visualization]
+  - explanation on how PGS variation matters more near the liability threshold, and affects the uncertainty in the disease risk
+  - [combined visualization of the ranking distribution and disease risk]
+
+- As in many studies the performance of PRSs is studied by computing the PGSs of a group of individuals (1000-10000) and ordering them based on PGS estimates, 
+  I tried to study the uncertainty caused by the limited size of this target group of individuals
+  - Estimated the true genetic value distribution in the population by generating genotypes for a large number of individuals, and computing their PRSs with the "true" effect sizes
+  - compared the PGS values at percentiles estimated with different target sample sizes to the true GV values at percentiles
+  --> As expected, with larger target sample size the absolute difference to the true GV percentiles decreases
+    - [jotain siitä että tutkimuksissa erotellaan yksilöt tällaisissa pienissä joukoissa, mikä on hyvän kokoinen joukko virheen kannalta]
+  - especially looked into the uncertainty at the top-PGS-percentiles, as they are where the uncertainty matters in practice.
+  
+- [risk plot on the uncertainty of disease risk on PGS percentiles]
+

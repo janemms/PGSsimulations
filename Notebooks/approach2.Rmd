@@ -1,0 +1,67 @@
+---
+title: "approach2"
+output: html_document
+date: "2025-07-22"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Simulate a population with disease prevalence K and variance explained by PRS h2. We assume the PRS distribution in the population follows approximately a standard normal distribution, and simulate N PRS values from N(0,1). We further simulate residual liability (environmental effects) with residual variance 1 - h2. Total liability is then $L = \beta \cdot \text{PRS} + \epsilon$, where PRS is the standardized. As the variance of the liability is normalized to one, $Var(L) = 1$, we have $Var(L) = Var(\beta\cdot\text{PRS}) + Var(\epsilon)$, which becomes $1 = \beta^2\cdot Var(PRS) + 1 - h^2$, and finally as $Var(PRS) = 1$, $\beta^2 = h^2$ and $\beta = \sqrt(h^2)$.
+
+```{r}
+N <- 1e6                # number of individuals in population
+K <- 0.1                # disease prevalence (10%)
+h2 <- 0.1           # variance explained by PRS on liability scale
+beta_liab <- sqrt(h2) # effect size on liability scaleq
+residual_var <- 1 - h2
+
+# Simulate PRS
+PRS <- rnorm(N, mean = 0, sd = 1)  # standardized PRS ~ N(0,1)
+
+# Simulate residual liability
+epsilon <- rnorm(N, mean = 0, sd = sqrt(residual_var))
+
+# Total liability
+liability <- beta_liab * PRS + epsilon
+
+# Disease threshold for prevalence K
+threshold <- qnorm(1 - K)
+
+# Assign disease status
+disease <- ifelse(liability > threshold, 1, 0)
+
+# Put in data frame
+df <- data.frame(PRS = PRS, disease = disease)
+
+# Fit logistic regression of disease on PRS
+logit_model <- glm(disease ~ PRS, data = df, family = "binomial")
+
+summary(logit_model)
+
+# Odds ratio per 1 SD increase in PRS
+OR_per_SD <- exp(coef(logit_model)["PRS"])
+cat("Odds ratio per SD increase in PRS:", OR_per_SD, "\n")
+
+# PRS value where OR = 2
+PRS_cutoff <- log(2) / coef(logit_model)["PRS"]
+cat("PRS value (Z-score) where OR = 2:", PRS_cutoff, "\n")
+```
+
+```{r}
+# Plot absolute risk vs PRS
+library(ggplot2)
+set.seed(123)
+
+df$pred_prob <- predict(logit_model, type = "response")
+
+df_plot <- df[sample(1:N, size = 10000), ]  # sample 10,000 points
+ggplot(df_plot, aes(x = PRS, y = pred_prob)) +
+  stat_smooth(method = "loess", color = "blue") +
+  labs(title = "Absolute Risk of Disease vs PRS",
+       x = "Polygenic Risk Score (Standardized)",
+       y = "Predicted Disease Probability") +
+  theme_minimal()
+
+```
